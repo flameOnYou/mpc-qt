@@ -13,6 +13,13 @@ class PlaylistWindow;
 
 class DrawnPlaylist;
 class PlaylistSelection;
+class QTextBrowser;
+class QPlainTextEdit;
+class QPushButton;
+class QListWidget;
+class QListWidgetItem;
+class QTreeWidget;
+class QTreeWidgetItem;
 class QThread;
 class PlaylistSearcher;
 class PlaylistWindow : public QDockWidget
@@ -84,6 +91,7 @@ signals:
     void playlistsBackupRequested();
     void playlistMovedToBackup(QUuid backupUuid);
     void closingPlaylist(QUuid playlist);
+    void chapterTimeRequested(double timeInSeconds);
 
 public slots:
     void setIconTheme(IconThemer::FolderMode folderMode, const QString &customFolder);
@@ -129,6 +137,7 @@ public slots:
 
     void revealSearch();
     void finishSearch();
+    void updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUuid, QUuid itemUuid, bool clickedInPlaylist);
 
 private slots:
     void savePlaylist(const QUuid &playlistUuid);
@@ -158,8 +167,26 @@ private slots:
     void on_tabWidget_currentChanged(int index);
 
     void on_searchField_returnPressed();
+    void chapterPreviewAnchorClicked(const QUrl &link);
+    void toggleChapterEditMode();
+    void saveChapterMarkdown();
+    void insertChapterTimeTag();
+    void chapterTopicSelectionChanged();
+    void chapterTopicCardActivated(QListWidgetItem *item);
 
 private:
+    bool isChapterPreviewTab(int index) const;
+    bool isChapterTopicsTab(int index) const;
+    void ensureChapterPreviewTab();
+    void ensureChapterTopicsTab();
+    void refreshChapterTopicsForCurrentPlaylist();
+    void loadChapterMarkdownFromPath(const QString &markdownPath);
+    void setChapterPreviewHtml(const QString &html);
+    QString buildChapterPreviewHtml(const QString &markdown);
+    bool validateChapterMarkdown(const QString &markdown, QString &error) const;
+    void setChapterEditorMode(bool editing);
+    double parseChapterTimeToSeconds(const QString &timeText, bool *ok) const;
+
     Ui::PlaylistWindow *ui = nullptr;
     IconThemer themer;
     QUuid currentPlaylist;
@@ -171,6 +198,24 @@ private:
     QHash<QUuid, DrawnPlaylist*> widgets;
     DrawnPlaylist* queueWidget = nullptr;
     PlaylistSelection *clipboard = nullptr;
+    QWidget *chapterPreviewTabWidget = nullptr;
+    QTextBrowser *chapterPreviewBrowser = nullptr;
+    QPlainTextEdit *chapterPreviewEditor = nullptr;
+    QPushButton *chapterModeButton = nullptr;
+    QPushButton *chapterSaveButton = nullptr;
+    QPushButton *chapterInsertTimeButton = nullptr;
+    QWidget *chapterTopicsTabWidget = nullptr;
+    QTreeWidget *chapterTopicTree = nullptr;
+    QListWidget *chapterTopicCards = nullptr;
+    QString chapterMarkdownPath;
+    bool chapterEditMode = false;
+
+    struct TopicCard {
+        QString label;
+        QString time;
+        QString markdownPath;
+    };
+    QHash<QString, QList<TopicCard>> topicCardsByPath;
 };
 
 #endif // PLAYLISTWINDOW_H
