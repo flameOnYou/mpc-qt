@@ -1,6 +1,7 @@
 #include <QAction>
 #include <algorithm>
 #include <QClipboard>
+#include <QDir>
 #include <QDragEnterEvent>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -29,6 +30,30 @@
 
 static constexpr char logModule[] =  "playlistwindow";
 static constexpr char keyCurrentPlaylist[] = "currentPlaylist";
+
+namespace {
+QString convertCardBlocksToMarkdown(const QString &markdown)
+{
+    static const QRegularExpression cardBlockRegex(
+        QStringLiteral("<card\\b[^>]*>(.*?)</card>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+
+    QString converted;
+    int lastPos = 0;
+    auto it = cardBlockRegex.globalMatch(markdown);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        converted += markdown.mid(lastPos, match.capturedStart() - lastPos);
+        QString body = match.captured(1).trimmed();
+        body.replace(QRegularExpression(QStringLiteral("\\r\\n?")), QStringLiteral("\n"));
+        body.replace(QStringLiteral("\n"), QStringLiteral("\n> "));
+        converted += QStringLiteral("\n---\n> %1\n---\n").arg(body);
+        lastPos = match.capturedEnd();
+    }
+    converted += markdown.mid(lastPos);
+    return converted;
+}
+}
 
 PlaylistWindow::PlaylistWindow(QWidget *parent) :
     QDockWidget(parent),
@@ -559,6 +584,12 @@ void PlaylistWindow::ensureChapterTopicsTab()
     layout->addWidget(chapterTopicTree, 2);
 
     chapterTopicCards = new QListWidget(chapterTopicsTabWidget);
+    chapterTopicCards->setWordWrap(true);
+    chapterTopicCards->setSpacing(6);
+    chapterTopicCards->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+    chapterTopicCards->setStyleSheet(
+                QStringLiteral("QListWidget::item { border: 1px solid palette(mid); "
+                               "border-radius: 4px; padding: 8px; margin: 2px 0; }"));
     connect(chapterTopicCards, &QListWidget::itemActivated,
             this, &PlaylistWindow::chapterTopicCardActivated);
     connect(chapterTopicCards, &QListWidget::itemClicked,
@@ -593,10 +624,10 @@ void PlaylistWindow::setChapterEditorMode(bool editing)
 QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime=(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
 
-    QString converted = markdown;
+    QString converted = convertCardBlocksToMarkdown(markdown);
     converted.replace(timeMarker,
                       QStringLiteral("[\\2](chapter://jump?time=\\1) <small>[\\1]</small>"));
 
@@ -608,7 +639,7 @@ QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
 bool PlaylistWindow::validateChapterMarkdown(const QString &markdown, QString &error) const
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime=(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption);
     QRegularExpressionMatchIterator it = timeMarker.globalMatch(markdown);
     QString stripped = markdown;
@@ -665,40 +696,61 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
 
     static const QRegularExpression topicRegex(
         QStringLiteral("#([\\w\\x{4e00}-\\x{9fa5}-]+(?:/[\\w\\x{4e00}-\\x{9fa5}-]+)*)"));
-    static const QRegularExpression cardRegex(
-        QStringLiteral("<time\\s+datetime=(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
-        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression cardBlockRegex(
+        QStringLiteral("<card\\b[^>]*>(.*?)</card>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression timeRegex(
+        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression htmlTagRegex(QStringLiteral("<[^>]+>"));
 
     QSet<QString> topicPaths;
+    QSet<QString> scannedMarkdownFiles;
     pl->iterateItems([&](QSharedPointer<Item> item) {
         if (!item || !item->url().isLocalFile())
             return;
         QFileInfo videoInfo(item->url().toLocalFile());
-        const QString markdownPath = videoInfo.dir().filePath(videoInfo.completeBaseName() + ".md");
-        QFile markdownFile(markdownPath);
-        if (!markdownFile.exists() || !markdownFile.open(QIODevice::ReadOnly | QIODevice::Text))
-            return;
-        const QString markdown = QString::fromUtf8(markdownFile.readAll());
-        const QStringList lines = markdown.split('\n');
-        for (const QString &line : lines) {
-            QStringList topicsInLine;
-            auto topicIt = topicRegex.globalMatch(line);
-            while (topicIt.hasNext()) {
-                const QString topicPath = topicIt.next().captured(1);
-                topicsInLine.append(topicPath);
-                topicPaths.insert(topicPath);
-            }
-            if (topicsInLine.isEmpty())
+        const QDir markdownDir = videoInfo.dir();
+        const QStringList markdownFiles = markdownDir.entryList({QStringLiteral("*.md")},
+                                                                QDir::Files | QDir::Readable,
+                                                                QDir::Name);
+        for (const QString &fileName : markdownFiles) {
+            const QString markdownPath = markdownDir.filePath(fileName);
+            if (scannedMarkdownFiles.contains(markdownPath))
                 continue;
-            auto cardIt = cardRegex.globalMatch(line);
+            scannedMarkdownFiles.insert(markdownPath);
+
+            QFile markdownFile(markdownPath);
+            if (!markdownFile.open(QIODevice::ReadOnly | QIODevice::Text))
+                continue;
+            const QString markdown = QString::fromUtf8(markdownFile.readAll());
+
+            auto cardIt = cardBlockRegex.globalMatch(markdown);
             while (cardIt.hasNext()) {
-                auto card = cardIt.next();
-                const QString time = card.captured(1);
-                const QString label = card.captured(2).trimmed();
-                if (label.isEmpty())
+                const auto cardMatch = cardIt.next();
+                const QString cardBody = cardMatch.captured(1);
+
+                QStringList topicsInCard;
+                auto topicIt = topicRegex.globalMatch(cardBody);
+                while (topicIt.hasNext()) {
+                    const QString topicPath = topicIt.next().captured(1);
+                    topicsInCard.append(topicPath);
+                    topicPaths.insert(topicPath);
+                }
+                if (topicsInCard.isEmpty())
                     continue;
-                for (const QString &topic : topicsInLine)
-                    topicCardsByPath[topic].append({label, time, markdownPath});
+
+                auto timeIt = timeRegex.globalMatch(cardBody);
+                while (timeIt.hasNext()) {
+                    const auto timeMatch = timeIt.next();
+                    const QString time = timeMatch.captured(1);
+                    QString label = timeMatch.captured(2).trimmed();
+                    label.remove(htmlTagRegex);
+                    if (label.isEmpty())
+                        label = tr("章节");
+                    for (const QString &topic : topicsInCard)
+                        topicCardsByPath[topic].append({label, time, markdownPath});
+                }
             }
         }
     });
@@ -1556,6 +1608,7 @@ void PlaylistWindow::saveChapterMarkdown()
     setChapterPreviewHtml(buildChapterPreviewHtml(markdown));
     refreshChapterTopicsForCurrentPlaylist();
     QMessageBox::information(this, tr("保存成功"), tr("章节 Markdown 已保存。"));
+    setChapterEditorMode(false);
 }
 
 void PlaylistWindow::insertChapterTimeTag()
@@ -1625,6 +1678,10 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     if (chapterPreviewTabWidget)
         ui->tabWidget->setCurrentWidget(chapterPreviewTabWidget);
     setChapterEditorMode(false);
+    bool ok = false;
+    const double seconds = parseChapterTimeToSeconds(time, &ok);
+    if (ok)
+        emit chapterTimeRequested(seconds);
     if (chapterPreviewBrowser) {
         if (!chapterPreviewBrowser->find(label))
             chapterPreviewBrowser->find(time);
