@@ -53,6 +53,18 @@ QString convertCardBlocksToMarkdown(const QString &markdown)
     converted += markdown.mid(lastPos);
     return converted;
 }
+
+QString extractTimeAttribute(const QString &attributes, const QString &name)
+{
+    const QRegularExpression attrRegex(
+        QStringLiteral("\\b%1\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")
+        .arg(QRegularExpression::escape(name)),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto match = attrRegex.match(attributes);
+    if (!match.hasMatch())
+        return QString();
+    return !match.captured(1).isEmpty() ? match.captured(1) : match.captured(2);
+}
 }
 
 PlaylistWindow::PlaylistWindow(QWidget *parent) :
@@ -624,31 +636,56 @@ void PlaylistWindow::setChapterEditorMode(bool editing)
 QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\b([^>]*)>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
 
     QString converted = convertCardBlocksToMarkdown(markdown);
-    converted.replace(timeMarker,
-                      QStringLiteral("[\\2](chapter://jump?time=\\1) <small>[\\1]</small>"));
+    QString rendered;
+    int lastPos = 0;
+    auto it = timeMarker.globalMatch(converted);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        rendered += converted.mid(lastPos, match.capturedStart() - lastPos);
+        const QString attributes = match.captured(1);
+        const QString timeText = extractTimeAttribute(attributes, QStringLiteral("datetime"));
+        const QString videoKey = extractTimeAttribute(attributes, QStringLiteral("video"));
+        const QString label = match.captured(2).trimmed();
+        bool ok = false;
+        parseChapterTimeToSeconds(timeText, &ok);
+        if (!ok) {
+            rendered += match.captured(0);
+        } else {
+            QUrlQuery query;
+            query.addQueryItem(QStringLiteral("time"), timeText);
+            if (!videoKey.isEmpty())
+                query.addQueryItem(QStringLiteral("video"), videoKey);
+            rendered += QStringLiteral("[%1](chapter://jump?%2) <small>[%3]</small>")
+                    .arg(label, query.toString(QUrl::FullyEncoded), timeText);
+        }
+        lastPos = match.capturedEnd();
+    }
+    rendered += converted.mid(lastPos);
 
     QTextDocument doc;
-    doc.setMarkdown(converted);
+    doc.setMarkdown(rendered);
     return doc.toHtml();
 }
 
 bool PlaylistWindow::validateChapterMarkdown(const QString &markdown, QString &error) const
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
-        QRegularExpression::CaseInsensitiveOption);
+        QStringLiteral("<time\\b([^>]*)>(.*?)</time>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     QRegularExpressionMatchIterator it = timeMarker.globalMatch(markdown);
     QString stripped = markdown;
     while (it.hasNext()) {
         auto match = it.next();
+        const QString attributes = match.captured(1);
+        const QString datetime = extractTimeAttribute(attributes, QStringLiteral("datetime"));
         bool ok = false;
-        parseChapterTimeToSeconds(match.captured(1), &ok);
+        parseChapterTimeToSeconds(datetime, &ok);
         if (!ok) {
-            error = tr("时间标签格式错误：%1").arg(match.captured(1));
+            error = tr("时间标签格式错误：%1").arg(datetime);
             return false;
         }
         stripped.replace(match.captured(0), QString());
@@ -700,7 +737,7 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
         QStringLiteral("<card\\b[^>]*>(.*?)</card>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression timeRegex(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\b([^>]*)>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression htmlTagRegex(QStringLiteral("<[^>]+>"));
 
@@ -743,9 +780,14 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
                 auto timeIt = timeRegex.globalMatch(cardBody);
                 while (timeIt.hasNext()) {
                     const auto timeMatch = timeIt.next();
-                    const QString time = timeMatch.captured(1);
+                    const QString attributes = timeMatch.captured(1);
+                    const QString time = extractTimeAttribute(attributes, QStringLiteral("datetime"));
                     QString label = timeMatch.captured(2).trimmed();
                     label.remove(htmlTagRegex);
+                    bool valid = false;
+                    parseChapterTimeToSeconds(time, &valid);
+                    if (!valid)
+                        continue;
                     if (label.isEmpty())
                         label = tr("章节");
                     for (const QString &topic : topicsInCard)
@@ -796,6 +838,35 @@ double PlaylistWindow::parseChapterTimeToSeconds(const QString &timeText, bool *
     if (!valid)
         return 0.0;
     return hour * 3600.0 + minute * 60.0 + second;
+}
+
+bool PlaylistWindow::findPlaylistItemForVideoKey(const QString &videoKey, QUuid *playlistUuid,
+                                                 QUuid *itemUuid) const
+{
+    auto pl = PlaylistCollection::getSingleton()->getPlaylist(currentPlaylist);
+    if (!pl || videoKey.trimmed().isEmpty())
+        return false;
+
+    const QString normalizedKey = videoKey.trimmed();
+    QUuid foundItem;
+    pl->iterateItems([&](QSharedPointer<Item> item) {
+        if (!foundItem.isNull() || !item || !item->url().isLocalFile())
+            return;
+        const QFileInfo fileInfo(item->url().toLocalFile());
+        const QString baseName = fileInfo.completeBaseName();
+        const QString fileName = fileInfo.fileName();
+        if (baseName.compare(normalizedKey, Qt::CaseInsensitive) == 0
+                || fileName.contains(normalizedKey, Qt::CaseInsensitive))
+            foundItem = item->uuid();
+    });
+
+    if (foundItem.isNull())
+        return false;
+    if (playlistUuid)
+        *playlistUuid = currentPlaylist;
+    if (itemUuid)
+        *itemUuid = foundItem;
+    return true;
 }
 
 void PlaylistWindow::addQuickQueue()
@@ -1680,8 +1751,16 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     setChapterEditorMode(false);
     bool ok = false;
     const double seconds = parseChapterTimeToSeconds(time, &ok);
-    if (ok)
-        emit chapterTimeRequested(seconds);
+    if (ok) {
+        QUuid playlistUuid;
+        QUuid itemUuid;
+        if (findPlaylistItemForVideoKey(QFileInfo(markdownPath).completeBaseName(),
+                                        &playlistUuid, &itemUuid)) {
+            emit chapterJumpRequested(playlistUuid, itemUuid, seconds);
+        } else {
+            emit chapterTimeRequested(seconds);
+        }
+    }
     if (chapterPreviewBrowser) {
         if (!chapterPreviewBrowser->find(label))
             chapterPreviewBrowser->find(time);
@@ -1725,9 +1804,20 @@ void PlaylistWindow::chapterPreviewAnchorClicked(const QUrl &link)
         return;
     const QUrlQuery query(link);
     const QString timeText = query.queryItemValue("time");
+    const QString videoKey = query.queryItemValue("video");
     bool ok = false;
     const double seconds = parseChapterTimeToSeconds(timeText, &ok);
     if (!ok)
         return;
+    if (!videoKey.isEmpty()) {
+        QUuid playlistUuid;
+        QUuid itemUuid;
+        if (findPlaylistItemForVideoKey(videoKey, &playlistUuid, &itemUuid))
+            emit chapterJumpRequested(playlistUuid, itemUuid, seconds);
+        else
+            QMessageBox::warning(this, tr("未找到视频"),
+                                 tr("未在播放列表中找到%1视频文件").arg(videoKey));
+        return;
+    }
     emit chapterTimeRequested(seconds);
 }

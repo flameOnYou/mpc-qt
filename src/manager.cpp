@@ -172,6 +172,8 @@ void PlaybackManager::setPlaylistWindow(PlaylistWindow *playlistWindow)
             playlistWindow, &PlaylistWindow::updateChapterPreviewForItem);
     connect(playlistWindow, &PlaylistWindow::chapterTimeRequested,
             this, &PlaybackManager::navigateToTime);
+    connect(playlistWindow, &PlaylistWindow::chapterJumpRequested,
+            this, &PlaybackManager::playItemAtTime);
 }
 
 QUrl PlaybackManager::nowPlaying()
@@ -251,6 +253,16 @@ void PlaybackManager::playItem(QUuid playlist, QUuid item, bool clickedInPlaylis
 {
     auto url = playlistWindow_->getUrlOf(playlist, item);
     startPlayWithUuid(url, playlist, item, false, QUrl(), clickedInPlaylist);
+}
+
+void PlaybackManager::playItemAtTime(QUuid playlist, QUuid item, double time)
+{
+    if (playlist == nowPlayingList && item == nowPlayingItem) {
+        navigateToTime(time);
+        return;
+    }
+    playItem(playlist, item, false);
+    mpvStartTime = time;
 }
 
 void PlaybackManager::playDevice(QUrl device)

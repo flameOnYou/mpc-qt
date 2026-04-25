@@ -92,6 +92,7 @@ signals:
     void playlistMovedToBackup(QUuid backupUuid);
     void closingPlaylist(QUuid playlist);
     void chapterTimeRequested(double timeInSeconds);
+    void chapterJumpRequested(QUuid playlistUuid, QUuid itemUuid, double timeInSeconds);
 
 public slots:
     void setIconTheme(IconThemer::FolderMode folderMode, const QString &customFolder);
@@ -186,6 +187,8 @@ private:
     bool validateChapterMarkdown(const QString &markdown, QString &error) const;
     void setChapterEditorMode(bool editing);
     double parseChapterTimeToSeconds(const QString &timeText, bool *ok) const;
+    bool findPlaylistItemForVideoKey(const QString &videoKey, QUuid *playlistUuid,
+                                     QUuid *itemUuid) const;
 
     Ui::PlaylistWindow *ui = nullptr;
     IconThemer themer;

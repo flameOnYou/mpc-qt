@@ -114,6 +114,7 @@ public slots:
     void playDiscFiles(QUrl where);             // from dvd/bd open
     void playStream(QUrl stream);               // from menu
     void playItem(QUuid playlist, QUuid item, bool clickedInPlaylist = false);  // called by playlistwindow
+    void playItemAtTime(QUuid playlist, QUuid item, double time);
     void playDevice(QUrl device);   // I don't have a device to test this
 
     void loadSubtitle(QUrl with);
