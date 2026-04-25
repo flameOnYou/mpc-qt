@@ -15,6 +15,8 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QRegularExpression>
 #include <QSet>
 #include <QTextBrowser>
@@ -71,6 +73,7 @@ PlaylistWindow::PlaylistWindow(QWidget *parent) :
     addQuickQueue();
     ensureChapterPreviewTab();
     ensureChapterTopicsTab();
+    ensureJumpHistoryTab();
     ui->searchHost->setVisible(false);
     ui->searchField->installEventFilter(this);
 
@@ -325,6 +328,8 @@ void PlaylistWindow::tabsFromVList(const QVariantList &qvl)
     chapterTopicsTabWidget = nullptr;
     chapterTopicTree = nullptr;
     chapterTopicCards = nullptr;
+    jumpHistoryTabWidget = nullptr;
+    jumpHistoryTable = nullptr;
     chapterMarkdownPath.clear();
     chapterEditMode = false;
     topicCardsByPath.clear();
@@ -352,6 +357,7 @@ void PlaylistWindow::tabsFromVList(const QVariantList &qvl)
         addNewTab(QUuid(), tr("Quick Playlist"));
     ensureChapterPreviewTab();
     ensureChapterTopicsTab();
+    ensureJumpHistoryTab();
     updatePlaylistHasItems();
 }
 
@@ -374,6 +380,12 @@ void PlaylistWindow::updateLanguage()
         if (idx >= 0)
             ui->tabWidget->setTabText(idx, tr("章节话题索引"));
     }
+    if (jumpHistoryTabWidget) {
+        int idx = ui->tabWidget->indexOf(jumpHistoryTabWidget);
+        if (idx >= 0)
+            ui->tabWidget->setTabText(idx, tr("跳转历史"));
+    }
+    refreshJumpHistoryTable();
 }
 
 bool PlaylistWindow::eventFilter(QObject *obj, QEvent *event)
@@ -522,6 +534,11 @@ bool PlaylistWindow::isChapterTopicsTab(int index) const
     return chapterTopicsTabWidget && ui->tabWidget->widget(index) == chapterTopicsTabWidget;
 }
 
+bool PlaylistWindow::isJumpHistoryTab(int index) const
+{
+    return jumpHistoryTabWidget && ui->tabWidget->widget(index) == jumpHistoryTabWidget;
+}
+
 void PlaylistWindow::ensureChapterPreviewTab()
 {
     if (chapterPreviewTabWidget)
@@ -600,6 +617,36 @@ void PlaylistWindow::ensureChapterTopicsTab()
     refreshChapterTopicsForCurrentPlaylist();
 }
 
+void PlaylistWindow::ensureJumpHistoryTab()
+{
+    if (jumpHistoryTabWidget)
+        return;
+
+    jumpHistoryTabWidget = new QWidget(ui->tabWidget);
+    auto *layout = new QVBoxLayout(jumpHistoryTabWidget);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(4);
+
+    jumpHistoryTable = new QTableWidget(jumpHistoryTabWidget);
+    jumpHistoryTable->setColumnCount(2);
+    jumpHistoryTable->setHorizontalHeaderLabels({tr("系统时间"), tr("跳转来源")});
+    jumpHistoryTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    jumpHistoryTable->setSelectionMode(QAbstractItemView::SingleSelection);
+    jumpHistoryTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    jumpHistoryTable->setAlternatingRowColors(true);
+    jumpHistoryTable->verticalHeader()->setVisible(false);
+    jumpHistoryTable->horizontalHeader()->setStretchLastSection(true);
+    jumpHistoryTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    connect(jumpHistoryTable, &QTableWidget::cellDoubleClicked,
+            this, &PlaylistWindow::jumpHistoryRowActivated);
+    connect(jumpHistoryTable, &QTableWidget::cellClicked,
+            this, &PlaylistWindow::jumpHistoryRowActivated);
+    layout->addWidget(jumpHistoryTable);
+
+    ui->tabWidget->addTab(jumpHistoryTabWidget, tr("跳转历史"));
+    refreshJumpHistoryTable();
+}
+
 void PlaylistWindow::setChapterPreviewHtml(const QString &html)
 {
     if (chapterPreviewBrowser)
@@ -624,31 +671,54 @@ void PlaylistWindow::setChapterEditorMode(bool editing)
 QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\s+([^>]*)>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
 
     QString converted = convertCardBlocksToMarkdown(markdown);
-    converted.replace(timeMarker,
-                      QStringLiteral("[\\2](chapter://jump?time=\\1) <small>[\\1]</small>"));
+    QString rendered;
+    int lastPos = 0;
+    auto it = timeMarker.globalMatch(converted);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        rendered += converted.mid(lastPos, match.capturedStart() - lastPos);
+        const QString attributes = match.captured(1);
+        const QString label = match.captured(2);
+        const QString time = chapterAttributeValue(attributes, QStringLiteral("datetime"));
+        const QString video = chapterAttributeValue(attributes, QStringLiteral("video"));
+        const QString target = video.isEmpty()
+                ? QStringLiteral("chapter://jump?time=%1").arg(time)
+                : QStringLiteral("chapter://jump?time=%1&video=%2")
+                      .arg(time, QString::fromUtf8(QUrl::toPercentEncoding(video)));
+        rendered += QStringLiteral("[%1](%2) <small>[%3]</small>")
+                .arg(label, target, time);
+        lastPos = match.capturedEnd();
+    }
+    rendered += converted.mid(lastPos);
 
     QTextDocument doc;
-    doc.setMarkdown(converted);
+    doc.setMarkdown(rendered);
     return doc.toHtml();
 }
 
 bool PlaylistWindow::validateChapterMarkdown(const QString &markdown, QString &error) const
 {
     static const QRegularExpression timeMarker(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\s+([^>]*)>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption);
     QRegularExpressionMatchIterator it = timeMarker.globalMatch(markdown);
     QString stripped = markdown;
     while (it.hasNext()) {
         auto match = it.next();
+        const QString attributes = match.captured(1);
+        const QString datetime = chapterAttributeValue(attributes, QStringLiteral("datetime"));
+        if (datetime.isEmpty()) {
+            error = tr("时间标签缺少 datetime 属性。");
+            return false;
+        }
         bool ok = false;
-        parseChapterTimeToSeconds(match.captured(1), &ok);
+        parseChapterTimeToSeconds(datetime, &ok);
         if (!ok) {
-            error = tr("时间标签格式错误：%1").arg(match.captured(1));
+            error = tr("时间标签格式错误：%1").arg(datetime);
             return false;
         }
         stripped.replace(match.captured(0), QString());
@@ -660,6 +730,19 @@ bool PlaylistWindow::validateChapterMarkdown(const QString &markdown, QString &e
         return false;
     }
     return true;
+}
+
+QString PlaylistWindow::chapterAttributeValue(const QString &attributes, const QString &name) const
+{
+    const QRegularExpression attrRegex(
+                QStringLiteral("\\b%1\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)')")
+                .arg(QRegularExpression::escape(name)),
+                QRegularExpression::CaseInsensitiveOption);
+    const auto match = attrRegex.match(attributes);
+    if (!match.hasMatch())
+        return QString();
+    const QString v1 = match.captured(1);
+    return v1.isEmpty() ? match.captured(2) : v1;
 }
 
 void PlaylistWindow::loadChapterMarkdownFromPath(const QString &markdownPath)
@@ -1558,7 +1641,7 @@ void PlaylistWindow::on_searchField_textEdited(const QString &arg1)
 
 void PlaylistWindow::on_tabWidget_currentChanged(int index)
 {
-    if (isChapterPreviewTab(index) || isChapterTopicsTab(index))
+    if (isChapterPreviewTab(index) || isChapterTopicsTab(index) || isJumpHistoryTab(index))
         ui->searchHost->setVisible(false);
     updateCurrentPlaylist();
 }
@@ -1678,10 +1761,7 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     if (chapterPreviewTabWidget)
         ui->tabWidget->setCurrentWidget(chapterPreviewTabWidget);
     setChapterEditorMode(false);
-    bool ok = false;
-    const double seconds = parseChapterTimeToSeconds(time, &ok);
-    if (ok)
-        emit chapterTimeRequested(seconds);
+    performChapterJump(time);
     if (chapterPreviewBrowser) {
         if (!chapterPreviewBrowser->find(label))
             chapterPreviewBrowser->find(time);
@@ -1695,6 +1775,7 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     Q_UNUSED(itemUuid)
     Q_UNUSED(clickedInPlaylist)
     ensureChapterPreviewTab();
+    currentPlayingUrl = itemUrl;
 
     if (!itemUrl.isLocalFile()) {
         chapterMarkdownPath.clear();
@@ -1725,9 +1806,119 @@ void PlaylistWindow::chapterPreviewAnchorClicked(const QUrl &link)
         return;
     const QUrlQuery query(link);
     const QString timeText = query.queryItemValue("time");
+    const QString targetVideo = QUrl::fromPercentEncoding(query.queryItemValue("video").toUtf8());
+    performChapterJump(timeText, targetVideo);
+}
+
+void PlaylistWindow::updateCurrentPlaybackTime(double timeInSeconds, double lengthInSeconds)
+{
+    Q_UNUSED(lengthInSeconds)
+    currentPlaybackTimeSeconds = std::max(0.0, timeInSeconds);
+}
+
+QString PlaylistWindow::displayNameForVideo(const QUrl &videoUrl) const
+{
+    if (videoUrl.isLocalFile())
+        return QFileInfo(videoUrl.toLocalFile()).fileName();
+    return videoUrl.fileName().isEmpty() ? videoUrl.toString() : videoUrl.fileName();
+}
+
+QString PlaylistWindow::formatSecondsAsClock(double seconds) const
+{
+    return Helpers::toDateFormatWithZero(std::max(0.0, seconds));
+}
+
+void PlaylistWindow::recordJumpHistoryEntry(const QUrl &videoUrl, double timeInSeconds)
+{
+    if (!videoUrl.isValid() || videoUrl.isEmpty())
+        return;
+    JumpHistoryEntry entry;
+    entry.systemTime = QDateTime::currentDateTime();
+    entry.sourceVideoUrl = videoUrl;
+    entry.sourceTimeSeconds = std::max(0.0, timeInSeconds);
+    jumpHistoryEntries.prepend(entry);
+    while (jumpHistoryEntries.size() > 50)
+        jumpHistoryEntries.removeLast();
+    refreshJumpHistoryTable();
+}
+
+void PlaylistWindow::refreshJumpHistoryTable()
+{
+    if (!jumpHistoryTable)
+        return;
+    jumpHistoryTable->setRowCount(jumpHistoryEntries.size());
+    for (int row = 0; row < jumpHistoryEntries.size(); ++row) {
+        const auto &entry = jumpHistoryEntries.at(row);
+        const QString systemTime = entry.systemTime.toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+        const QString source = QStringLiteral("%1 %2")
+                .arg(displayNameForVideo(entry.sourceVideoUrl), formatSecondsAsClock(entry.sourceTimeSeconds));
+        auto *timeItem = new QTableWidgetItem(systemTime);
+        auto *sourceItem = new QTableWidgetItem(source);
+        sourceItem->setData(Qt::UserRole, entry.sourceVideoUrl);
+        sourceItem->setData(Qt::UserRole + 1, entry.sourceTimeSeconds);
+        jumpHistoryTable->setItem(row, 0, timeItem);
+        jumpHistoryTable->setItem(row, 1, sourceItem);
+    }
+}
+
+bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
+{
+    const QString needle = videoFileName.trimmed();
+    if (needle.isEmpty())
+        return false;
+
+    bool matched = false;
+    PlaylistCollection::getSingleton()->iteratePlaylists([&](QSharedPointer<Playlist> pl) {
+        if (matched || !pl)
+            return;
+        pl->iterateItems([&](QSharedPointer<Item> item) {
+            if (matched || !item || !item->url().isLocalFile())
+                return;
+            QFileInfo info(item->url().toLocalFile());
+            if (info.fileName().compare(needle, Qt::CaseInsensitive) == 0) {
+                matched = true;
+                activateItem(pl->uuid(), item->uuid(), true);
+                emit itemDesired(pl->uuid(), item->uuid(), true);
+            }
+        });
+    });
+    return matched;
+}
+
+void PlaylistWindow::performChapterJump(const QString &timeText, const QString &targetVideoFileName,
+                                        bool recordHistory)
+{
     bool ok = false;
     const double seconds = parseChapterTimeToSeconds(timeText, &ok);
     if (!ok)
         return;
+
+    if (recordHistory)
+        recordJumpHistoryEntry(currentPlayingUrl, currentPlaybackTimeSeconds);
+
+    const QString target = targetVideoFileName.trimmed();
+    if (!target.isEmpty()) {
+        if (!jumpToVideoFileName(target)) {
+            QMessageBox::warning(this, tr("跳转失败"),
+                                 tr("在播放列表中未找到视频文件：%1").arg(target));
+            return;
+        }
+    }
     emit chapterTimeRequested(seconds);
+}
+
+void PlaylistWindow::jumpHistoryRowActivated(int row, int column)
+{
+    Q_UNUSED(column)
+    if (!jumpHistoryTable || row < 0 || row >= jumpHistoryTable->rowCount())
+        return;
+    auto *sourceItem = jumpHistoryTable->item(row, 1);
+    if (!sourceItem)
+        return;
+    const QUrl url = sourceItem->data(Qt::UserRole).toUrl();
+    const double timeSeconds = sourceItem->data(Qt::UserRole + 1).toDouble();
+    if (!url.isLocalFile())
+        return;
+    const QString timeText = formatSecondsAsClock(timeSeconds);
+    performChapterJump(timeText, QFileInfo(url.toLocalFile()).fileName());
 }
