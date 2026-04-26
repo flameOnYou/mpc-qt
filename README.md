@@ -1,215 +1,191 @@
-## Media Player Classic Qute Theater ([homepage])
+## Media Player Classic Qute Theater（[项目主页][homepage]）
 
-Media Player Classic reimplemented with Qt and libmpv.
+MPC-QT 是基于 Qt 与 libmpv 实现的 Media Player Classic 风格播放器。
 
-![screenshot]
-More screenshots: https://mpc-qt.github.io/gallery
+![项目截图][screenshot]
+更多截图请见：https://mpc-qt.github.io/gallery
 
-[MPC-HC][mpc-hc] (Media Player Classic Home Cinema) is considered by many to
-be the quintessential media player for the Windows desktop.  MPC-QT (Media Player
-Classic Qute Theater) aims to reproduce most of the interface and
-functionality of MPC-HC while using [libmpv] to play video instead of
-DirectShow.
+[MPC-HC][mpc-hc]（Media Player Classic Home Cinema）一直是 Windows 平台上广受欢迎的经典播放器。MPC-QT（Media Player Classic Qute Theater）旨在复刻 MPC-HC 的主要界面与使用体验，同时使用 [libmpv] 作为播放后端，而非 DirectShow。
 
-* [Releases](#releases)
-* [Features and improvements over MPC-HC](#features-and-improvements-over-mpc-hc)
-* [Contributing and translation](#contributing-code-and-translations)
-* [Compiling](#compiling)
-* [Compiling on Windows](#compiling-on-windows)
-* [Questions and answers](#questions-and-answers)
+- [发布与下载](#发布与下载)
+- [核心特性](#核心特性)
+- [Fork 之后的改动整理](#fork-之后的改动整理)
+- [贡献代码与翻译](#贡献代码与翻译)
+- [编译指南](#编译指南)
+- [Windows 编译](#windows-编译)
+- [常见问题](#常见问题)
 
-## Releases
+## 发布与下载
 
-[Packages are available] for various systems.  
-There are release builds for Windows and Linux users on the [release page]; these use time-based
-versioning (e.g. 17.07 corresponds to July 2017).  
-There are [development builds] for Windows and Linux (AppImage, Flatpak and native build).  
+- 项目提供多个平台的软件包，可在 [下载页面][Packages are available] 获取。
+- Windows 与 Linux 可在 [Release 页面][release page] 下载稳定构建版本（采用时间版本号，例如 17.07 表示 2017 年 7 月）。
+- 也提供 Windows / Linux（AppImage、Flatpak、原生构建）的 [开发版构建][development builds]。
 
-Note that unimplemented features in the options dialog are hidden and (where
-this is not possible) disabled.  This is to preserve the familiar options layout
-from MPC-HC in the meantime.
+说明：选项对话框中尚未实现的功能会被隐藏；如果无法隐藏则会禁用。这样做是为了在功能逐步补齐期间，尽可能保留 MPC-HC 的选项布局与使用习惯。
 
+## 核心特性
 
-## Features and improvements over MPC-HC
+- **MPC-HC 风格复刻**：覆盖普通用户高频使用的大部分功能。
+- **多播放列表**：可为不同剧集或任务维护独立播放列表，并分别记录各自上次播放位置。
+- **进度条视频预览（缩略图）**。
+- **在线播放支持**（依赖 [yt-dlp]）。
+- **快速插播（Quick Queue）**：支持类似 xmms/qmmp 的乱序临时播放，不破坏原播放列表结构。
+- **播放列表搜索**：支持多线程搜索，提高大型列表检索效率。
+- **截图模板**：可自定义截图命名模板，仅保留你需要的字段。
+- **自定义元数据展示**：播放列表窗口可显示更多自定义媒体信息。
+- **界面样式定制**：支持应用内样式个性化。
 
-**Clone:** Nearly everything that MPC-HC does for the casual user.
+### 可能的后续功能
 
-**Multiple playlists:**  When you're watching shows on your backlog, load
-every show into separate playlists and still keep track of the last played
-file *for each playlist*.  Finally you can eliminate the need to keep track of
-your progress in a spreadsheet, all while never leaving the comfort of your
-favorite media player.
+以下为愿望清单（取决于开发者时间）：
 
-**Video preview on seekbar (thumbnail)**
+- **类似 VirtualDub 的编码能力**：可在播放器内快速导出片段（需要额外编码后端支持）。
 
-**Play online videos (with [yt-dlp])**
+欢迎提交建议。
 
-**Quick queuing:**  Out-of-order playback in the same style of xmms/qmmp.
-Got some compilation albums in a playlist, but want to hear only some rock
-tracks for a while?  Now you can, without obliterating your playlist.
+## Fork 之后的改动整理
 
-**Playlist searching:**  Multi-threaded playlist searching, in the same style
-as other media players.  Find the tracks you want, when you want them.
+以下内容基于本仓库自 Fork 以来的主要提交（以当前分支历史为准）整理：
 
-**Screenshot templates:**  Take screenshots with a custom, sleek and stylized
-filename.  Only include the information that you want.
+### 1) 发布流程与版本元数据统一
+- 优化 GitHub Release 工作流，改为支持手动输入标签。
+- 统一版本相关元数据，减少多平台发布流程中的重复配置与维护成本。
 
-**Custom metadata:**  Display custom metadata in the playlist window.  Want to
-show the artist as well as the title, down to even the encoder used?  Nothing
-is stopping you.
+### 2) 新增“章节索引 / 主题卡片”能力
+- 在播放列表相关界面中新增章节索引标签页（Topic Index Tab）。
+- 增强章节卡片解析逻辑，提升 Markdown 章节导航可用性。
 
-**Race Inspired Cosmetic Enhancements:**  In-app custom styling support.  Make
-the app go faster!
+### 3) 章节 Markdown 编辑与校验
+- 新增可编辑章节 Markdown 的模式。
+- 在保存/处理前进行格式校验，减少无效内容进入流程。
 
-### Possible upcoming features
+### 4) 兼容性修复与稳定性改进
+- 修复章节 Markdown 后缀识别问题，兼容大写扩展名以及 `.markdown` 文件。
+- 修复部分章节卡片跳转与预览流程中的错误，提升章节预览功能稳定性。
 
-These features are wishlist items and are subject to the developer's time.
+### 5) 涉及的核心文件（便于后续追踪）
+- `.github/workflows/release.yml`
+- `src/playlistwindow.h`
+- `src/playlistwindow.cpp`
+- `src/manager.cpp`
 
-**Encoding support like VirtualDub:**  Churn out clips faster.  No need to
-open a video editor when your media player can do your job for you.  Requires
-writing an encoder-orientated backend.
+## 贡献代码与翻译
 
-Suggestions welcome.
-
-## Contributing code and translations
-
-If you are a coder, try to follow the conventions in the code and make a PR (pull request).<br />
-If you are a translator, we will be using [Weblate] to [translate][Translating].<br />
-Alternatively, you can submit the translations as a PR.
+- 如果你希望贡献代码，欢迎先遵循现有代码风格后提交 PR。
+- 如果你希望贡献翻译，可通过 [Weblate] 参与协作，也可以直接提交翻译 PR。
 
 [![Translation status]][Weblate]
 
-## Compiling
+## 编译指南
 
 [![C/C++ CI]][C/C++ CI link]
 
-The best version is git master, and everyone is encouraged to increase their
-computer-fu by compiling from source (see sections below).  Compiling from
-source gives you several advantages over the usual user, such as the ability to
-use latest and pre-release software regardless of where it comes from.  Unix
-users, there could even be packages in your distro that help with this (e.g.
-[aur], [ports]).
+通常建议直接使用最新代码进行构建。源码编译可让你更快体验到新功能及预发布依赖版本。
 
-### Prerequisites
+### 依赖要求
 
-You need the Qt6 SDK installed and a recent edition of libmpv.  On Ubuntu you
-can usually install the required libraries and tools with the
-`build-essential`, `cmake`, `qt6-base-dev`, `qt6-l10n-tools`, `libqt6svg6-dev`,
-`libmpv-dev` and `boost` packages.  A recent edition of [libmpv] means either from git
-head or at least version 0.37.0.
+需要安装 Qt6 SDK 与较新的 libmpv。以 Ubuntu 为例，常见依赖包括：
 
-### I don't know git, how do I do this?
+- `build-essential`
+- `cmake`
+- `qt6-base-dev`
+- `qt6-l10n-tools`
+- `libqt6svg6-dev`
+- `libmpv-dev`
+- `boost`
 
-First ensure you have the prerequisites as mentioned above, then open a terminal
-and `cd` into your general source-code directory. If one does not exist,
-`mkdir` one.
+建议 libmpv 至少为 0.37.0，或直接使用最新源码版本。
 
->mkdir src
+### 基础构建流程（Linux/Unix）
 
->cd ~/src
+```bash
+mkdir -p ~/src
+cd ~/src
+git clone https://github.com/mpc-qt/mpc-qt.git
+cd mpc-qt
+```
 
-Then clone this git repository using the following command:
+使用 CMake + Make：
 
->git clone https://github.com/mpc-qt/mpc-qt.git
+```bash
+cmake .
+make -j"$(nproc)"
+```
 
-Finally, `cd` into the checked-out repository.
+安装 / 卸载：
 
->cd mpc-qt
+```bash
+sudo make install
+sudo make uninstall
+```
 
-Then the easiest way to build with CMake and install:
+开发建议使用 CMake + Ninja（子目录构建）：
 
->cmake .
+```bash
+cmake -B build -G Ninja
+cmake --build build -t update_translations
+cmake --build build
+```
 
->make -j\`nproc\`
+安装 / 卸载 / 清理：
 
-To install:
+```bash
+sudo cmake --install build
+sudo cmake --build build -t uninstall
+cmake --build build -t clean
+```
 
->sudo make install
+后续更新：
 
-To uninstall:
+```bash
+git pull origin master
+```
 
->sudo make uninstall
+### 遇到编译或链接错误？
 
-If you plan to help with development, it's better to build with CMake + Ninja in a subdirectory:
+部分发行版仓库中的 mpv/libmpv 版本可能较旧。可参考 [mpv-build repo] 的说明自行构建较新版本。
 
->cmake -B build -G Ninja
-
->cmake --build build -t update_translations
-
->cmake --build build
-
-or
-
->cmake -G Ninja -B build ; cmake --build build -t update_translations ; cmake --build build
-
-To install:
-
->sudo cmake --install build
-
-To uninstall:
-
->sudo cmake --build build -t uninstall
-
-To clean the build files:
-
->cmake --build build -t clean
-
-You're done!  Later on, performing a git pull from inside the source code
-directory will get the latest changes.
-
->git pull origin master
-
-Rebuild by following the cmake+make or cmake+ninja steps as described above.
-
-### I have compiler/linker errors
-
-Some distros have an ancient version of mpv in their repos.  You can install
-libmpv by following the instructions at the [mpv-build repo].
-
-## Compiling on Windows
+## Windows 编译
 
 [![Msys2 CI]][Msys2 CI link]
 
-While this program is meant for Unix, it is possible to compile it on Windows
-with MSYS2.  MSVC is not supported due to the nature of the build process, but
-may work in theory if you throw enough stubbornness at it.
+项目可在 MSYS2 环境下编译。建议在 MSYS2 MINGW64 中执行：
 
-From a fresh installation of MSYS2, run the following from an MSYS2 MINGW64
-prompt.  First, update the packages
+```bash
+pacman -Syu
+# 重启终端后再次执行
+pacman -Syu
+```
 
->pacman -Syu
+安装构建依赖：
 
-Restart MSYS2 MINGW64 when prompted to do so and re-run pacman.
+```bash
+pacman -S base-devel mingw-w64-x86_64-cmake git mingw-w64-x86_64-toolchain \
+mingw-w64-x86_64-qt6 mingw-w64-x86_64-qt-creator \
+mingw-w64-x86_64-imagemagick mingw-w64-x86_64-boost
+```
 
->pacman -Syu
+可选择：
+1. 使用与 MSYS2 ffmpeg 链接的 libmpv；或
+2. 使用预编译 libmpv（见 [shinchiro's release page]）。
 
-At this stage packages required for building can be installed (Copy and paste
-this as one line).
+如果采用预编译包，请将文件放入对应目录后，使用：
 
->pacman -S base-devel mingw-w64-x86_64-cmake git mingw-w64-x86_64-toolchain
->mingw-w64-x86_64-qt6 mingw-w64-x86_64-qt-creator
->mingw-w64-x86_64-imagemagick mingw-w64-x86_64-boost
+```bash
+cmake -DENABLE_LOCAL_MPV=ON .
+make -j"$(nproc)"
+```
 
-MPC-QT can be compiled with a libmpv linked to MSYS2's ffmpeg libraries, or by
-using the prebuilt library released on sourceforge.  To use the prebuilt
-library after cloning this repository, download libmpv from [shinchiro's
-release page], and extract it somewhere.  Place the files in the root folder
-of mpv-dev-x86_64-*.7z into `mpv-dev/lib`. Then place the files in its include
-folder into `mpv-dev/include/mpv`.  If you do this, compile with the
-`-DENABLE_LOCAL_MPV=ON` option.
+## 常见问题
 
->cmake -DENABLE_LOCAL_MPV=ON .
+另见 [Wiki Q&A] 及 Wiki 其他页面。
 
->make -j\`nproc\`
+### 是否兼容 SVP（SmoothVideo Project）？
 
-Congratulations, you have now built MPC-QT!
+兼容。请在 SVP 中设置：
 
-## Questions and answers
-See also the [Wiki Q&A] and the other pages of the wiki.
-### Is MPC-QT compatible with SVP (SmoothVideo Project)?
-Yes! You just need to change two SVP settings:
-- the path to mpv's JSON IPC to point to `/tmp/cmdrkotori.mpc-qt.mpv`
-- the path to the player to point to `/usr/bin/mpc-qt`
+- mpv JSON IPC 路径为 `/tmp/cmdrkotori.mpc-qt.mpv`
+- 播放器路径为 `/usr/bin/mpc-qt`
 
 [homepage]:https://mpc-qt.github.io/
 [screenshot]:https://raw.githubusercontent.com/mpc-qt/mpc-qt-screenshots/refs/heads/master/Screenshot_20250602_151626.png
@@ -219,16 +195,15 @@ Yes! You just need to change two SVP settings:
 [Packages are available]:https://mpc-qt.github.io/downloads
 [development builds]:https://mpc-qt.github.io/downloads#dev-builds
 [yt-dlp]:https://github.com/yt-dlp/yt-dlp
-[weblate]:https://hosted.weblate.org/engage/mpc-qt/
-[Translating]:https://github.com/mpc-qt/mpc-qt/wiki/Translating
-[Translation status]:https://hosted.weblate.org/widget/mpc-qt/multi-auto.svg
-[C/C++ CI]:https://github.com/mpc-qt/mpc-qt/actions/workflows/linux.yml/badge.svg
-[C/C++ CI link]:https://github.com/mpc-qt/mpc-qt/actions/workflows/linux.yml
-[Msys2 CI]:https://github.com/mpc-qt/mpc-qt/actions/workflows/windows-msys2.yml/badge.svg
-[Msys2 CI link]:https://github.com/mpc-qt/mpc-qt/actions/workflows/windows-msys2.yml
+[Weblate]:https://hosted.weblate.org/engage/mpc-qt/
+[Translating]:https://hosted.weblate.org/projects/mpc-qt/
+[Translation status]:https://hosted.weblate.org/widgets/mpc-qt/-/svg-badge.svg
+[C/C++ CI]:https://github.com/mpc-qt/mpc-qt/actions/workflows/c-cpp.yml/badge.svg
+[C/C++ CI link]:https://github.com/mpc-qt/mpc-qt/actions/workflows/c-cpp.yml
 [aur]:https://aur.archlinux.org/packages/mpc-qt-git/
-[ports]:https://www.freshports.org/multimedia/mpc-qt
+[ports]:https://github.com/freebsd/freebsd-ports/tree/main/multimedia/mpc-qt
 [mpv-build repo]:https://github.com/mpv-player/mpv-build
+[Msys2 CI]:https://github.com/mpc-qt/mpc-qt/actions/workflows/msys2.yml/badge.svg
+[Msys2 CI link]:https://github.com/mpc-qt/mpc-qt/actions/workflows/msys2.yml
 [shinchiro's release page]:https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
-[MSYS2 edition of Qt Creator]:https://wiki.qt.io/MSYS2
-[Wiki Q&A]:https://github.com/mpc-qt/mpc-qt/wiki/Questions-and-answers
+[Wiki Q&A]:https://github.com/mpc-qt/mpc-qt/wiki/Q%26A
