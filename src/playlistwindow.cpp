@@ -53,6 +53,28 @@ QString convertCardBlocksToMarkdown(const QString &markdown)
     converted += markdown.mid(lastPos);
     return converted;
 }
+
+static QString findChapterMarkdownForVideo(const QFileInfo &videoInfo)
+{
+    const QDir dir = videoInfo.dir();
+    const QString baseName = videoInfo.completeBaseName();
+
+    const QStringList candidateNames = {
+        baseName + QStringLiteral(".md"),
+        baseName + QStringLiteral(".MD"),
+        baseName + QStringLiteral(".markdown"),
+        baseName + QStringLiteral(".MARKDOWN")
+    };
+
+    for (const QString &candidate : candidateNames) {
+        const QString path = dir.filePath(candidate);
+        QFileInfo info(path);
+        if (info.exists() && info.isFile() && info.isReadable())
+            return path;
+    }
+
+    return QString();
+}
 }
 
 PlaylistWindow::PlaylistWindow(QWidget *parent) :
@@ -711,7 +733,10 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
             return;
         QFileInfo videoInfo(item->url().toLocalFile());
         const QDir markdownDir = videoInfo.dir();
-        const QStringList markdownFiles = markdownDir.entryList({QStringLiteral("*.md")},
+        const QStringList markdownFiles = markdownDir.entryList({QStringLiteral("*.md"),
+                                                                 QStringLiteral("*.MD"),
+                                                                 QStringLiteral("*.markdown"),
+                                                                 QStringLiteral("*.MARKDOWN")},
                                                                 QDir::Files | QDir::Readable,
                                                                 QDir::Name);
         for (const QString &fileName : markdownFiles) {
@@ -1706,9 +1731,8 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     }
 
     const QFileInfo videoInfo(itemUrl.toLocalFile());
-    chapterMarkdownPath = videoInfo.dir().filePath(videoInfo.completeBaseName() + ".md");
-    QFile markdownFile(chapterMarkdownPath);
-    if (!markdownFile.exists()) {
+    chapterMarkdownPath = findChapterMarkdownForVideo(videoInfo);
+    if (chapterMarkdownPath.isEmpty()) {
         if (chapterPreviewEditor)
             chapterPreviewEditor->clear();
         setChapterPreviewHtml(tr("<p>No chapter markdown found for the current video.</p>"));
