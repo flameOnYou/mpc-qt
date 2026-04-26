@@ -1980,6 +1980,20 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     ensureChapterPreviewTab();
     currentPlayingUrl = itemUrl;
 
+    if (pendingChapterJump) {
+        const QString currentVideoName = itemUrl.isLocalFile()
+                ? QFileInfo(itemUrl.toLocalFile()).fileName()
+                : QString();
+        if (pendingChapterJumpTargetVideo.isEmpty()
+                || currentVideoName.compare(pendingChapterJumpTargetVideo, Qt::CaseInsensitive) == 0) {
+            const double pendingSeconds = pendingChapterJumpSeconds;
+            pendingChapterJump = false;
+            pendingChapterJumpSeconds = 0.0;
+            pendingChapterJumpTargetVideo.clear();
+            emit chapterTimeRequested(pendingSeconds);
+        }
+    }
+
     if (!itemUrl.isLocalFile()) {
         chapterMarkdownPath.clear();
         if (chapterPreviewEditor)
@@ -2123,7 +2137,14 @@ void PlaylistWindow::performChapterJump(const QString &timeText, const QString &
                                  tr("未找到视频文件：%1。已按播放列表与 Markdown 扫描目录尝试查找。").arg(target));
             return;
         }
+        pendingChapterJump = true;
+        pendingChapterJumpSeconds = seconds;
+        pendingChapterJumpTargetVideo = target;
+        return;
     }
+    pendingChapterJump = false;
+    pendingChapterJumpSeconds = 0.0;
+    pendingChapterJumpTargetVideo.clear();
     emit chapterTimeRequested(seconds);
 }
 
