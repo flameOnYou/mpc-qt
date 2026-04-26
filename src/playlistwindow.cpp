@@ -505,6 +505,7 @@ void PlaylistWindow::updateCurrentPlaylist()
     setTabOrder(qdp, ui->searchField);
     updatePlaylistHasItems();
     refreshChapterTopicsForCurrentPlaylist();
+    refreshChapterMarkdownFileList(true);
     updateChapterFolderPathLabel();
 }
 
@@ -988,11 +989,11 @@ void PlaylistWindow::refreshChapterMarkdownFileList(bool preserveSelection)
     if (!chapterMarkdownFileList)
         return;
 
-    const QString previousPath = preserveSelection
-            ? chapterMarkdownPath
-            : chapterMarkdownFileList->currentItem()
-                  ? chapterMarkdownFileList->currentItem()->data(Qt::UserRole).toString()
-                  : QString();
+    QString previousPath;
+    if (chapterMarkdownFileList->currentItem())
+        previousPath = chapterMarkdownFileList->currentItem()->data(Qt::UserRole).toString();
+    if (preserveSelection && previousPath.isEmpty())
+        previousPath = chapterMarkdownPath;
 
     chapterMarkdownFileList->clear();
     chapterMarkdownPath.clear();
@@ -1927,8 +1928,6 @@ void PlaylistWindow::on_tabWidget_currentChanged(int index)
 {
     if (isChapterPreviewTab(index) || isChapterTopicsTab(index) || isJumpHistoryTab(index))
         ui->searchHost->setVisible(false);
-    if (isChapterPreviewTab(index))
-        refreshChapterMarkdownFileList(true);
     updateCurrentPlaylist();
 }
 
@@ -1953,7 +1952,7 @@ void PlaylistWindow::saveChapterMarkdown()
     ensureChapterPreviewTab();
     if (chapterMarkdownPath.isEmpty()) {
         QMessageBox::warning(this, tr("无法保存"),
-                             tr("当前视频不是本地文件，无法保存章节 Markdown。"));
+                             tr("当前未选择章节 Markdown 文件。"));
         return;
     }
     if (!chapterPreviewEditor)
@@ -2075,9 +2074,8 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     Q_UNUSED(clickedInPlaylist)
     ensureChapterPreviewTab();
     currentPlayingUrl = itemUrl;
-
-    refreshChapterMarkdownFileList(true);
     refreshChapterTopicsForCurrentPlaylist();
+    updateChapterFolderPathLabel();
 }
 
 void PlaylistWindow::chapterPreviewAnchorClicked(const QUrl &link)
