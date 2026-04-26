@@ -23,6 +23,7 @@ class QTreeWidgetItem;
 class QTableWidget;
 class QThread;
 class PlaylistSearcher;
+class QLabel;
 class PlaylistWindow : public QDockWidget
 {
     Q_OBJECT
@@ -202,6 +203,8 @@ private:
     void ensureJumpHistoryTab();
     bool isJumpHistoryTab(int index) const;
     void refreshJumpHistoryTable();
+    QString chapterMarkdownScanFolder() const;
+    void updateChapterFolderPathLabel();
 
     Ui::PlaylistWindow *ui = nullptr;
     IconThemer themer;
@@ -225,6 +228,7 @@ private:
     QListWidget *chapterTopicCards = nullptr;
     QWidget *jumpHistoryTabWidget = nullptr;
     QTableWidget *jumpHistoryTable = nullptr;
+    QLabel *chapterFolderPathLabel = nullptr;
     QString chapterMarkdownPath;
     bool chapterEditMode = false;
     QUrl currentPlayingUrl;

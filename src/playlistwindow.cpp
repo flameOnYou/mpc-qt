@@ -10,6 +10,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
 #include <QListWidget>
@@ -96,6 +97,12 @@ PlaylistWindow::PlaylistWindow(QWidget *parent) :
     ensureChapterPreviewTab();
     ensureChapterTopicsTab();
     ensureJumpHistoryTab();
+    chapterFolderPathLabel = new QLabel(this);
+    chapterFolderPathLabel->setWordWrap(true);
+    chapterFolderPathLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    if (ui->contents && ui->contents->layout())
+        ui->contents->layout()->addWidget(chapterFolderPathLabel);
+    updateChapterFolderPathLabel();
     ui->searchHost->setVisible(false);
     ui->searchField->installEventFilter(this);
 
@@ -125,6 +132,7 @@ void PlaylistWindow::clearPlaylist(QUuid what)
         widgets[what]->removeAll();
     updatePlaylistHasItems();
     refreshChapterTopicsForCurrentPlaylist();
+    updateChapterFolderPathLabel();
 }
 
 PlaylistItem PlaylistWindow::addToPlaylist(const QUuid &playlist, const QList<QUrl> &what)
@@ -142,6 +150,7 @@ PlaylistItem PlaylistWindow::addToPlaylist(const QUuid &playlist, const QList<QU
     }
     updatePlaylistHasItems();
     refreshChapterTopicsForCurrentPlaylist();
+    updateChapterFolderPathLabel();
     return firstPlaylistItem;
 }
 
@@ -381,6 +390,7 @@ void PlaylistWindow::tabsFromVList(const QVariantList &qvl)
     ensureChapterTopicsTab();
     ensureJumpHistoryTab();
     updatePlaylistHasItems();
+    updateChapterFolderPathLabel();
 }
 
 void PlaylistWindow::updateIcons()
@@ -408,6 +418,7 @@ void PlaylistWindow::updateLanguage()
             ui->tabWidget->setTabText(idx, tr("跳转历史"));
     }
     refreshJumpHistoryTable();
+    updateChapterFolderPathLabel();
 }
 
 bool PlaylistWindow::eventFilter(QObject *obj, QEvent *event)
@@ -513,6 +524,7 @@ void PlaylistWindow::updateCurrentPlaylist()
     setTabOrder(qdp, ui->searchField);
     updatePlaylistHasItems();
     refreshChapterTopicsForCurrentPlaylist();
+    updateChapterFolderPathLabel();
 }
 
 void PlaylistWindow::updatePlaylistHasItems()
@@ -797,6 +809,41 @@ void PlaylistWindow::setChapterEditorMode(bool editing)
     chapterInsertTimeButton->setVisible(editing);
 }
 
+QString PlaylistWindow::chapterMarkdownScanFolder() const
+{
+    if (!chapterMarkdownPath.isEmpty()) {
+        QFileInfo markdownInfo(chapterMarkdownPath);
+        if (markdownInfo.exists())
+            return markdownInfo.absolutePath();
+    }
+
+    auto pl = PlaylistCollection::getSingleton()->getPlaylist(currentPlaylist);
+    if (!pl)
+        return QString();
+
+    QString localFolder;
+    pl->iterateItems([&](QSharedPointer<Item> item) {
+        if (!localFolder.isEmpty() || !item || !item->url().isLocalFile())
+            return;
+        localFolder = QFileInfo(item->url().toLocalFile()).absolutePath();
+    });
+    return localFolder;
+}
+
+void PlaylistWindow::updateChapterFolderPathLabel()
+{
+    if (!chapterFolderPathLabel)
+        return;
+
+    const QString folder = chapterMarkdownScanFolder();
+    if (folder.isEmpty()) {
+        chapterFolderPathLabel->setText(tr("Markdown 扫描目录：未找到本地视频目录"));
+    } else {
+        chapterFolderPathLabel->setText(
+                    tr("Markdown 扫描目录：%1（会扫描该目录下全部 .md/.markdown 文件）").arg(folder));
+    }
+}
+
 QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
 {
     static const QRegularExpression timeMarker(
@@ -850,6 +897,14 @@ bool PlaylistWindow::validateChapterMarkdown(const QString &markdown, QString &e
             error = tr("时间标签格式错误：%1").arg(datetime);
             return false;
         }
+        const QString video = chapterAttributeValue(attributes, QStringLiteral("video"));
+        if (!video.isEmpty()) {
+            const QString cleaned = video.trimmed();
+            if (cleaned.contains('/') || cleaned.contains('\\')) {
+                error = tr("video 属性仅支持文件名，不支持路径：%1").arg(video);
+                return false;
+            }
+        }
         stripped.replace(match.captured(0), QString());
     }
 
@@ -890,6 +945,7 @@ void PlaylistWindow::loadChapterMarkdownFromPath(const QString &markdownPath)
     if (chapterPreviewEditor)
         chapterPreviewEditor->setPlainText(markdown);
     setChapterPreviewHtml(buildChapterPreviewHtml(markdown));
+    updateChapterFolderPathLabel();
 }
 
 void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
@@ -912,7 +968,7 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
         QStringLiteral("<card\\b[^>]*>(.*?)</card>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression timeRegex(
-        QStringLiteral("<time\\s+datetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')>(.*?)</time>"),
+        QStringLiteral("<time\\b[^>]*\\bdatetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')[^>]*>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression htmlTagRegex(QStringLiteral("<[^>]+>"));
 
@@ -1915,6 +1971,7 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
             chapterPreviewEditor->clear();
         setChapterPreviewHtml(tr("<p>Chapter preview only supports local video files.</p>"));
         refreshChapterTopicsForCurrentPlaylist();
+        updateChapterFolderPathLabel();
         return;
     }
 
@@ -1925,6 +1982,7 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
             chapterPreviewEditor->clear();
         setChapterPreviewHtml(tr("<p>No chapter markdown found for the current video.</p>"));
         refreshChapterTopicsForCurrentPlaylist();
+        updateChapterFolderPathLabel();
         return;
     }
     loadChapterMarkdownFromPath(chapterMarkdownPath);
@@ -2013,7 +2071,23 @@ bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
             }
         });
     });
-    return matched;
+    if (matched)
+        return true;
+
+    const QString scanFolder = chapterMarkdownScanFolder();
+    if (!scanFolder.isEmpty()) {
+        const QString absolutePath = QDir(scanFolder).filePath(needle);
+        QFileInfo targetInfo(absolutePath);
+        if (targetInfo.exists() && targetInfo.isFile() && targetInfo.isReadable()) {
+            const PlaylistItem added = addToCurrentPlaylist({ QUrl::fromLocalFile(targetInfo.absoluteFilePath()) });
+            if (!added.item.isNull()) {
+                activateItem(added.list, added.item, true);
+                emit itemDesired(added.list, added.item, true);
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 void PlaylistWindow::performChapterJump(const QString &timeText, const QString &targetVideoFileName,
@@ -2031,7 +2105,7 @@ void PlaylistWindow::performChapterJump(const QString &timeText, const QString &
     if (!target.isEmpty()) {
         if (!jumpToVideoFileName(target)) {
             QMessageBox::warning(this, tr("跳转失败"),
-                                 tr("在播放列表中未找到视频文件：%1").arg(target));
+                                 tr("未找到视频文件：%1。已按播放列表与 Markdown 扫描目录尝试查找。").arg(target));
             return;
         }
     }
