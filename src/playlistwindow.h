@@ -175,6 +175,8 @@ private slots:
     void toggleChapterEditMode();
     void saveChapterMarkdown();
     void insertChapterTimeTag();
+    void refreshChapterMarkdownFileList(bool preserveSelection = true);
+    void chapterMarkdownFileActivated(QListWidgetItem *item);
     void chapterTopicSelectionChanged();
     void chapterTopicCardActivated(QListWidgetItem *item);
     void jumpHistoryRowActivated(int row, int column);
@@ -205,6 +207,7 @@ private:
     void refreshJumpHistoryTable();
     QString chapterMarkdownScanFolder() const;
     void updateChapterFolderPathLabel();
+    QStringList chapterMarkdownFilesInFolder(const QString &folderPath) const;
 
     Ui::PlaylistWindow *ui = nullptr;
     IconThemer themer;
@@ -223,6 +226,8 @@ private:
     QPushButton *chapterModeButton = nullptr;
     QPushButton *chapterSaveButton = nullptr;
     QPushButton *chapterInsertTimeButton = nullptr;
+    QPushButton *chapterRefreshButton = nullptr;
+    QListWidget *chapterMarkdownFileList = nullptr;
     QWidget *chapterTopicsTabWidget = nullptr;
     QTreeWidget *chapterTopicTree = nullptr;
     QListWidget *chapterTopicCards = nullptr;
