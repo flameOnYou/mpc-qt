@@ -416,6 +416,14 @@ bool PlaylistWindow::eventFilter(QObject *obj, QEvent *event)
     return QDockWidget::eventFilter(obj, event);
 }
 
+void PlaylistWindow::changeEvent(QEvent *event)
+{
+    if (event->type() == QEvent::PaletteChange
+            || event->type() == QEvent::ApplicationPaletteChange)
+        applyChapterTabStyles();
+    QDockWidget::changeEvent(event);
+}
+
 void PlaylistWindow::dragEnterEvent(QDragEnterEvent *event)
 {
     if (event->mimeData()->hasUrls())
@@ -581,9 +589,12 @@ void PlaylistWindow::ensureChapterPreviewTab()
     layout->addWidget(chapterPreviewBrowser);
 
     chapterPreviewEditor = new QPlainTextEdit(chapterPreviewTabWidget);
+    chapterPreviewEditor->setPlaceholderText(
+                tr("在这里编辑当前视频的章节 Markdown，保存后会自动刷新预览。"));
     chapterPreviewEditor->setVisible(false);
     layout->addWidget(chapterPreviewEditor);
 
+    applyChapterTabStyles();
     ui->tabWidget->addTab(chapterPreviewTabWidget, tr("视频章节预览"));
     setChapterPreviewHtml(tr("<p>No chapter markdown found for the current video.</p>"));
     setChapterEditorMode(false);
@@ -609,23 +620,119 @@ void PlaylistWindow::ensureChapterTopicsTab()
     chapterTopicCards->setWordWrap(true);
     chapterTopicCards->setSpacing(6);
     chapterTopicCards->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-    chapterTopicCards->setStyleSheet(
-                QStringLiteral("QListWidget::item { border: 1px solid palette(mid); "
-                               "border-radius: 4px; padding: 8px; margin: 2px 0; }"));
     connect(chapterTopicCards, &QListWidget::itemActivated,
             this, &PlaylistWindow::chapterTopicCardActivated);
     connect(chapterTopicCards, &QListWidget::itemClicked,
             this, &PlaylistWindow::chapterTopicCardActivated);
     layout->addWidget(chapterTopicCards, 3);
 
+    applyChapterTabStyles();
     ui->tabWidget->addTab(chapterTopicsTabWidget, tr("章节话题索引"));
     refreshChapterTopicsForCurrentPlaylist();
 }
 
 void PlaylistWindow::setChapterPreviewHtml(const QString &html)
 {
-    if (chapterPreviewBrowser)
+    if (chapterPreviewBrowser) {
+        chapterPreviewBrowser->document()->setDefaultStyleSheet(buildChapterPreviewStyleSheet());
         chapterPreviewBrowser->setHtml(html);
+    }
+}
+
+void PlaylistWindow::applyChapterTabStyles()
+{
+    if (chapterPreviewBrowser) {
+        chapterPreviewBrowser->setStyleSheet(
+                    QStringLiteral("QTextBrowser {"
+                                   "background: palette(base);"
+                                   "border: 1px solid palette(mid);"
+                                   "border-radius: 8px;"
+                                   "padding: 8px;"
+                                   "}"));
+    }
+
+    if (chapterPreviewEditor) {
+        chapterPreviewEditor->setStyleSheet(
+                    QStringLiteral("QPlainTextEdit {"
+                                   "background: palette(base);"
+                                   "color: palette(text);"
+                                   "selection-background-color: palette(highlight);"
+                                   "border: 1px solid palette(mid);"
+                                   "border-radius: 8px;"
+                                   "padding: 8px;"
+                                   "font-family: \"JetBrains Mono\", \"Consolas\", \"Monaco\", monospace;"
+                                   "font-size: 13px;"
+                                   "}"));
+    }
+
+    if (chapterModeButton && chapterInsertTimeButton && chapterSaveButton) {
+        const QString buttonStyle = QStringLiteral("QPushButton {"
+                                                   "padding: 6px 12px;"
+                                                   "border-radius: 6px;"
+                                                   "border: 1px solid palette(mid);"
+                                                   "background: palette(button);"
+                                                   "color: palette(button-text);"
+                                                   "}"
+                                                   "QPushButton:hover { border-color: palette(highlight); }"
+                                                   "QPushButton:checked {"
+                                                   "background: palette(highlight);"
+                                                   "color: palette(highlighted-text);"
+                                                   "border-color: palette(highlight);"
+                                                   "}");
+        chapterModeButton->setStyleSheet(buttonStyle);
+        chapterInsertTimeButton->setStyleSheet(buttonStyle);
+        chapterSaveButton->setStyleSheet(buttonStyle);
+    }
+
+    if (chapterTopicTree) {
+        chapterTopicTree->setStyleSheet(
+                    QStringLiteral("QTreeWidget {"
+                                   "background: palette(base);"
+                                   "border: 1px solid palette(mid);"
+                                   "border-radius: 8px;"
+                                   "padding: 4px;"
+                                   "}"
+                                   "QTreeWidget::item { padding: 6px 4px; }"));
+    }
+
+    if (chapterTopicCards) {
+        chapterTopicCards->setStyleSheet(
+                    QStringLiteral("QListWidget {"
+                                   "background: palette(base);"
+                                   "border: 1px solid palette(mid);"
+                                   "border-radius: 8px;"
+                                   "padding: 4px;"
+                                   "}"
+                                   "QListWidget::item {"
+                                   "border: 1px solid palette(mid);"
+                                   "background: palette(alternate-base);"
+                                   "border-radius: 6px;"
+                                   "padding: 8px;"
+                                   "margin: 2px 0;"
+                                   "}"
+                                   "QListWidget::item:selected {"
+                                   "background: palette(highlight);"
+                                   "color: palette(highlighted-text);"
+                                   "border-color: palette(highlight);"
+                                   "}"));
+    }
+}
+
+QString PlaylistWindow::buildChapterPreviewStyleSheet() const
+{
+    const auto pal = palette();
+    return QStringLiteral(
+               "body { color: %1; background-color: transparent; font-size: 14px; line-height: 1.6; }"
+               "h1, h2, h3, h4, h5, h6 { color: %1; margin-top: 1.1em; }"
+               "a { color: %2; text-decoration: none; }"
+               "blockquote { margin: 0.8em 0; padding: 0.6em 0.9em; border-left: 3px solid %3; background: %4; border-radius: 4px; }"
+               "code, pre { background: %4; color: %1; border-radius: 4px; }"
+               "pre { padding: 8px; }"
+               "hr { border: 0; border-top: 1px solid %3; margin: 12px 0; }")
+        .arg(pal.color(QPalette::Text).name(QColor::HexArgb),
+             pal.color(QPalette::Link).name(QColor::HexArgb),
+             pal.color(QPalette::Mid).name(QColor::HexArgb),
+             pal.color(QPalette::AlternateBase).name(QColor::HexArgb));
 }
 
 void PlaylistWindow::setChapterEditorMode(bool editing)
