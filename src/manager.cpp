@@ -170,6 +170,8 @@ void PlaybackManager::setPlaylistWindow(PlaylistWindow *playlistWindow)
             playlistWindow, &PlaylistWindow::changePlaylistSelection);
     connect(this, &PlaybackManager::nowPlayingChanged,
             playlistWindow, &PlaylistWindow::updateChapterPreviewForItem);
+    connect(this, &PlaybackManager::timeChanged,
+            playlistWindow, &PlaylistWindow::updateCurrentPlaybackTime);
     connect(playlistWindow, &PlaylistWindow::chapterTimeRequested,
             this, &PlaybackManager::navigateToTime);
 }

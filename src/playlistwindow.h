@@ -20,6 +20,7 @@ class QListWidget;
 class QListWidgetItem;
 class QTreeWidget;
 class QTreeWidgetItem;
+class QTableWidget;
 class QThread;
 class PlaylistSearcher;
 class PlaylistWindow : public QDockWidget
@@ -139,6 +140,7 @@ public slots:
     void revealSearch();
     void finishSearch();
     void updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUuid, QUuid itemUuid, bool clickedInPlaylist);
+    void updateCurrentPlaybackTime(double timeInSeconds, double lengthInSeconds);
 
 private slots:
     void savePlaylist(const QUuid &playlistUuid);
@@ -174,6 +176,7 @@ private slots:
     void insertChapterTimeTag();
     void chapterTopicSelectionChanged();
     void chapterTopicCardActivated(QListWidgetItem *item);
+    void jumpHistoryRowActivated(int row, int column);
 
 private:
     bool isChapterPreviewTab(int index) const;
@@ -189,6 +192,16 @@ private:
     bool validateChapterMarkdown(const QString &markdown, QString &error) const;
     void setChapterEditorMode(bool editing);
     double parseChapterTimeToSeconds(const QString &timeText, bool *ok) const;
+    QString chapterAttributeValue(const QString &attributes, const QString &name) const;
+    void performChapterJump(const QString &timeText, const QString &targetVideoFileName = QString(),
+                            bool recordHistory = true);
+    void recordJumpHistoryEntry(const QUrl &videoUrl, double timeInSeconds);
+    QString displayNameForVideo(const QUrl &videoUrl) const;
+    QString formatSecondsAsClock(double seconds) const;
+    bool jumpToVideoFileName(const QString &videoFileName);
+    void ensureJumpHistoryTab();
+    bool isJumpHistoryTab(int index) const;
+    void refreshJumpHistoryTable();
 
     Ui::PlaylistWindow *ui = nullptr;
     IconThemer themer;
@@ -210,15 +223,25 @@ private:
     QWidget *chapterTopicsTabWidget = nullptr;
     QTreeWidget *chapterTopicTree = nullptr;
     QListWidget *chapterTopicCards = nullptr;
+    QWidget *jumpHistoryTabWidget = nullptr;
+    QTableWidget *jumpHistoryTable = nullptr;
     QString chapterMarkdownPath;
     bool chapterEditMode = false;
+    QUrl currentPlayingUrl;
+    double currentPlaybackTimeSeconds = 0.0;
 
     struct TopicCard {
         QString label;
         QString time;
         QString markdownPath;
     };
+    struct JumpHistoryEntry {
+        QDateTime systemTime;
+        QUrl sourceVideoUrl;
+        double sourceTimeSeconds = 0.0;
+    };
     QHash<QString, QList<TopicCard>> topicCardsByPath;
+    QList<JumpHistoryEntry> jumpHistoryEntries;
 };
 
 #endif // PLAYLISTWINDOW_H
