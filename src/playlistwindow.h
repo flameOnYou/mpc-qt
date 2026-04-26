@@ -233,6 +233,9 @@ private:
     bool chapterEditMode = false;
     QUrl currentPlayingUrl;
     double currentPlaybackTimeSeconds = 0.0;
+    bool pendingChapterJump = false;
+    double pendingChapterJumpSeconds = 0.0;
+    QString pendingChapterJumpTargetVideo;
 
     struct TopicCard {
         QString label;
