@@ -968,7 +968,7 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
         QStringLiteral("<card\\b[^>]*>(.*?)</card>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression timeRegex(
-        QStringLiteral("<time\\b[^>]*\\bdatetime\\s*=\\s*(?:\"|')(\\d{1,2}:\\d{2}:\\d{2})(?:\"|')[^>]*>(.*?)</time>"),
+        QStringLiteral("<time\\b([^>]*)>(.*?)</time>"),
         QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
     static const QRegularExpression htmlTagRegex(QStringLiteral("<[^>]+>"));
 
@@ -1014,13 +1014,19 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
                 auto timeIt = timeRegex.globalMatch(cardBody);
                 while (timeIt.hasNext()) {
                     const auto timeMatch = timeIt.next();
-                    const QString time = timeMatch.captured(1);
+                    const QString attributes = timeMatch.captured(1);
+                    const QString time = chapterAttributeValue(attributes, QStringLiteral("datetime")).trimmed();
+                    bool valid = false;
+                    parseChapterTimeToSeconds(time, &valid);
+                    if (!valid)
+                        continue;
+                    const QString targetVideoFileName = chapterAttributeValue(attributes, QStringLiteral("video")).trimmed();
                     QString label = timeMatch.captured(2).trimmed();
                     label.remove(htmlTagRegex);
                     if (label.isEmpty())
                         label = tr("章节");
                     for (const QString &topic : topicsInCard)
-                        topicCardsByPath[topic].append({label, time, markdownPath});
+                        topicCardsByPath[topic].append({label, time, markdownPath, targetVideoFileName});
                 }
             }
         }
@@ -1047,25 +1053,32 @@ void PlaylistWindow::refreshChapterTopicsForCurrentPlaylist()
 
 double PlaylistWindow::parseChapterTimeToSeconds(const QString &timeText, bool *ok) const
 {
-    const QStringList parts = timeText.split(':');
-    if (parts.size() != 3) {
+    static const QRegularExpression timePattern(
+        QStringLiteral("^(?:(\\d+):)?([0-5]?\\d):([0-5]?\\d(?:\\.\\d+)?)$"));
+
+    const QString normalized = timeText.trimmed();
+    const auto match = timePattern.match(normalized);
+    if (!match.hasMatch()) {
         if (ok)
             *ok = false;
         return 0.0;
     }
-    bool hourOk = false;
+
+    bool hourOk = true;
     bool minuteOk = false;
     bool secondOk = false;
-    int hour = parts[0].toInt(&hourOk);
-    int minute = parts[1].toInt(&minuteOk);
-    int second = parts[2].toInt(&secondOk);
-    bool valid = hourOk && minuteOk && secondOk
+    const QString hourText = match.captured(1);
+    const int hour = hourText.isEmpty() ? 0 : hourText.toInt(&hourOk);
+    const int minute = match.captured(2).toInt(&minuteOk);
+    const double second = match.captured(3).toDouble(&secondOk);
+    const bool valid = hourOk && minuteOk && secondOk
             && hour >= 0 && minute >= 0 && minute < 60
-            && second >= 0 && second < 60;
+            && second >= 0.0 && second < 60.0;
     if (ok)
         *ok = valid;
     if (!valid)
         return 0.0;
+
     return hour * 3600.0 + minute * 60.0 + second;
 }
 
@@ -1932,6 +1945,7 @@ void PlaylistWindow::chapterTopicSelectionChanged()
         item->setData(Qt::UserRole, card.markdownPath);
         item->setData(Qt::UserRole + 1, card.label);
         item->setData(Qt::UserRole + 2, card.time);
+        item->setData(Qt::UserRole + 3, card.targetVideoFileName);
     }
 }
 
@@ -1942,6 +1956,7 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     const QString markdownPath = item->data(Qt::UserRole).toString();
     const QString label = item->data(Qt::UserRole + 1).toString();
     const QString time = item->data(Qt::UserRole + 2).toString();
+    const QString targetVideoFileName = item->data(Qt::UserRole + 3).toString();
     if (markdownPath.isEmpty())
         return;
 
@@ -1949,7 +1964,7 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     if (chapterPreviewTabWidget)
         ui->tabWidget->setCurrentWidget(chapterPreviewTabWidget);
     setChapterEditorMode(false);
-    performChapterJump(time);
+    performChapterJump(time, targetVideoFileName);
     if (chapterPreviewBrowser) {
         if (!chapterPreviewBrowser->find(label))
             chapterPreviewBrowser->find(time);

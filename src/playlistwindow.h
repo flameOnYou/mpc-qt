@@ -238,6 +238,7 @@ private:
         QString label;
         QString time;
         QString markdownPath;
+        QString targetVideoFileName;
     };
     struct JumpHistoryEntry {
         QDateTime systemTime;
