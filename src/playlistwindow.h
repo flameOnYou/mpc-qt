@@ -177,6 +177,7 @@ private slots:
     void insertChapterTimeTag();
     void chapterTopicSelectionChanged();
     void chapterTopicCardActivated(QListWidgetItem *item);
+    void chapterMarkdownFileActivated(QListWidgetItem *item);
     void jumpHistoryRowActivated(int row, int column);
 
 private:
@@ -185,6 +186,7 @@ private:
     void ensureChapterPreviewTab();
     void ensureChapterTopicsTab();
     void refreshChapterTopicsForCurrentPlaylist();
+    void refreshChapterMarkdownFileList(bool preserveSelection = true);
     void loadChapterMarkdownFromPath(const QString &markdownPath);
     void setChapterPreviewHtml(const QString &html);
     void applyChapterTabStyles();
@@ -220,9 +222,11 @@ private:
     QWidget *chapterPreviewTabWidget = nullptr;
     QTextBrowser *chapterPreviewBrowser = nullptr;
     QPlainTextEdit *chapterPreviewEditor = nullptr;
+    QListWidget *chapterMarkdownFileList = nullptr;
     QPushButton *chapterModeButton = nullptr;
     QPushButton *chapterSaveButton = nullptr;
     QPushButton *chapterInsertTimeButton = nullptr;
+    QPushButton *chapterRefreshButton = nullptr;
     QWidget *chapterTopicsTabWidget = nullptr;
     QTreeWidget *chapterTopicTree = nullptr;
     QListWidget *chapterTopicCards = nullptr;

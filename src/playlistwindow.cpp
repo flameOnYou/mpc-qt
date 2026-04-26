@@ -57,27 +57,6 @@ QString convertCardBlocksToMarkdown(const QString &markdown)
     return converted;
 }
 
-static QString findChapterMarkdownForVideo(const QFileInfo &videoInfo)
-{
-    const QDir dir = videoInfo.dir();
-    const QString baseName = videoInfo.completeBaseName();
-
-    const QStringList candidateNames = {
-        baseName + QStringLiteral(".md"),
-        baseName + QStringLiteral(".MD"),
-        baseName + QStringLiteral(".markdown"),
-        baseName + QStringLiteral(".MARKDOWN")
-    };
-
-    for (const QString &candidate : candidateNames) {
-        const QString path = dir.filePath(candidate);
-        QFileInfo info(path);
-        if (info.exists() && info.isFile() && info.isReadable())
-            return path;
-    }
-
-    return QString();
-}
 }
 
 PlaylistWindow::PlaylistWindow(QWidget *parent) :
@@ -353,9 +332,11 @@ void PlaylistWindow::tabsFromVList(const QVariantList &qvl)
     chapterPreviewTabWidget = nullptr;
     chapterPreviewBrowser = nullptr;
     chapterPreviewEditor = nullptr;
+    chapterMarkdownFileList = nullptr;
     chapterModeButton = nullptr;
     chapterSaveButton = nullptr;
     chapterInsertTimeButton = nullptr;
+    chapterRefreshButton = nullptr;
     chapterTopicsTabWidget = nullptr;
     chapterTopicTree = nullptr;
     chapterTopicCards = nullptr;
@@ -607,26 +588,54 @@ void PlaylistWindow::ensureChapterPreviewTab()
     connect(chapterSaveButton, &QPushButton::clicked,
             this, &PlaylistWindow::saveChapterMarkdown);
     actionsLayout->addWidget(chapterSaveButton);
+
+    chapterRefreshButton = new QPushButton(tr("刷新"), chapterPreviewTabWidget);
+    connect(chapterRefreshButton, &QPushButton::clicked, this, [this]() {
+        refreshChapterMarkdownFileList(false);
+    });
+    actionsLayout->addWidget(chapterRefreshButton);
     actionsLayout->addStretch();
     layout->addLayout(actionsLayout);
 
-    chapterPreviewBrowser = new QTextBrowser(chapterPreviewTabWidget);
+    auto *contentLayout = new QHBoxLayout();
+    contentLayout->setContentsMargins(0, 0, 0, 0);
+    contentLayout->setSpacing(6);
+    layout->addLayout(contentLayout, 1);
+
+    chapterMarkdownFileList = new QListWidget(chapterPreviewTabWidget);
+    chapterMarkdownFileList->setSelectionMode(QAbstractItemView::SingleSelection);
+    chapterMarkdownFileList->setMaximumWidth(280);
+    chapterMarkdownFileList->setMinimumWidth(180);
+    connect(chapterMarkdownFileList, &QListWidget::itemActivated,
+            this, &PlaylistWindow::chapterMarkdownFileActivated);
+    connect(chapterMarkdownFileList, &QListWidget::itemClicked,
+            this, &PlaylistWindow::chapterMarkdownFileActivated);
+    contentLayout->addWidget(chapterMarkdownFileList, 0);
+
+    auto *previewPane = new QWidget(chapterPreviewTabWidget);
+    auto *previewLayout = new QVBoxLayout(previewPane);
+    previewLayout->setContentsMargins(0, 0, 0, 0);
+    previewLayout->setSpacing(4);
+    contentLayout->addWidget(previewPane, 1);
+
+    chapterPreviewBrowser = new QTextBrowser(previewPane);
     chapterPreviewBrowser->setOpenLinks(false);
     chapterPreviewBrowser->setOpenExternalLinks(false);
     connect(chapterPreviewBrowser, &QTextBrowser::anchorClicked,
             this, &PlaylistWindow::chapterPreviewAnchorClicked);
-    layout->addWidget(chapterPreviewBrowser);
+    previewLayout->addWidget(chapterPreviewBrowser);
 
-    chapterPreviewEditor = new QPlainTextEdit(chapterPreviewTabWidget);
+    chapterPreviewEditor = new QPlainTextEdit(previewPane);
     chapterPreviewEditor->setPlaceholderText(
                 tr("在这里编辑当前视频的章节 Markdown，保存后会自动刷新预览。"));
     chapterPreviewEditor->setVisible(false);
-    layout->addWidget(chapterPreviewEditor);
+    previewLayout->addWidget(chapterPreviewEditor);
 
     applyChapterTabStyles();
     ui->tabWidget->addTab(chapterPreviewTabWidget, tr("视频章节预览"));
     setChapterPreviewHtml(tr("<p>No chapter markdown found for the current video.</p>"));
     setChapterEditorMode(false);
+    refreshChapterMarkdownFileList(false);
 }
 
 void PlaylistWindow::ensureChapterTopicsTab()
@@ -741,6 +750,27 @@ void PlaylistWindow::applyChapterTabStyles()
         chapterModeButton->setStyleSheet(buttonStyle);
         chapterInsertTimeButton->setStyleSheet(buttonStyle);
         chapterSaveButton->setStyleSheet(buttonStyle);
+        if (chapterRefreshButton)
+            chapterRefreshButton->setStyleSheet(buttonStyle);
+    }
+
+    if (chapterMarkdownFileList) {
+        chapterMarkdownFileList->setStyleSheet(
+                    QStringLiteral("QListWidget {"
+                                   "background: palette(base);"
+                                   "border: 1px solid palette(mid);"
+                                   "border-radius: 8px;"
+                                   "padding: 4px;"
+                                   "}"
+                                   "QListWidget::item {"
+                                   "border-radius: 4px;"
+                                   "padding: 6px 8px;"
+                                   "margin: 2px 0;"
+                                   "}"
+                                   "QListWidget::item:selected {"
+                                   "background: palette(highlight);"
+                                   "color: palette(highlighted-text);"
+                                   "}"));
     }
 
     if (chapterTopicTree) {
@@ -811,23 +841,27 @@ void PlaylistWindow::setChapterEditorMode(bool editing)
 
 QString PlaylistWindow::chapterMarkdownScanFolder() const
 {
+    auto pl = PlaylistCollection::getSingleton()->getPlaylist(currentPlaylist);
+    if (pl) {
+        QString localFolder;
+        pl->iterateItems([&](QSharedPointer<Item> item) {
+            if (!localFolder.isEmpty() || !item || !item->url().isLocalFile())
+                return;
+            localFolder = QFileInfo(item->url().toLocalFile()).absolutePath();
+        });
+        if (!localFolder.isEmpty())
+            return localFolder;
+    }
+
+    if (currentPlayingUrl.isLocalFile())
+        return QFileInfo(currentPlayingUrl.toLocalFile()).absolutePath();
+
     if (!chapterMarkdownPath.isEmpty()) {
         QFileInfo markdownInfo(chapterMarkdownPath);
         if (markdownInfo.exists())
             return markdownInfo.absolutePath();
     }
-
-    auto pl = PlaylistCollection::getSingleton()->getPlaylist(currentPlaylist);
-    if (!pl)
-        return QString();
-
-    QString localFolder;
-    pl->iterateItems([&](QSharedPointer<Item> item) {
-        if (!localFolder.isEmpty() || !item || !item->url().isLocalFile())
-            return;
-        localFolder = QFileInfo(item->url().toLocalFile()).absolutePath();
-    });
-    return localFolder;
+    return QString();
 }
 
 void PlaylistWindow::updateChapterFolderPathLabel()
@@ -945,6 +979,55 @@ void PlaylistWindow::loadChapterMarkdownFromPath(const QString &markdownPath)
     if (chapterPreviewEditor)
         chapterPreviewEditor->setPlainText(markdown);
     setChapterPreviewHtml(buildChapterPreviewHtml(markdown));
+    updateChapterFolderPathLabel();
+}
+
+void PlaylistWindow::refreshChapterMarkdownFileList(bool preserveSelection)
+{
+    ensureChapterPreviewTab();
+    if (!chapterMarkdownFileList)
+        return;
+
+    const QString previousPath = preserveSelection
+            ? chapterMarkdownPath
+            : chapterMarkdownFileList->currentItem()
+                  ? chapterMarkdownFileList->currentItem()->data(Qt::UserRole).toString()
+                  : QString();
+
+    chapterMarkdownFileList->clear();
+    chapterMarkdownPath.clear();
+    setChapterEditorMode(false);
+
+    const QString folder = chapterMarkdownScanFolder();
+    if (folder.isEmpty()) {
+        setChapterPreviewHtml(tr("<p>Markdown 扫描目录不可用。</p>"));
+        updateChapterFolderPathLabel();
+        return;
+    }
+
+    QDir dir(folder);
+    const QStringList markdownFiles = dir.entryList({QStringLiteral("*.md"),
+                                                     QStringLiteral("*.MD"),
+                                                     QStringLiteral("*.markdown"),
+                                                     QStringLiteral("*.MARKDOWN")},
+                                                    QDir::Files | QDir::Readable,
+                                                    QDir::Name);
+    if (markdownFiles.isEmpty()) {
+        setChapterPreviewHtml(tr("<p>No markdown files found in the playlist folder.</p>"));
+        updateChapterFolderPathLabel();
+        return;
+    }
+
+    int selectedIndex = 0;
+    for (int i = 0; i < markdownFiles.size(); ++i) {
+        const QString fullPath = dir.filePath(markdownFiles.at(i));
+        auto *item = new QListWidgetItem(markdownFiles.at(i), chapterMarkdownFileList);
+        item->setData(Qt::UserRole, fullPath);
+        if (!previousPath.isEmpty() && QFileInfo(fullPath) == QFileInfo(previousPath))
+            selectedIndex = i;
+    }
+    chapterMarkdownFileList->setCurrentRow(selectedIndex);
+    chapterMarkdownFileActivated(chapterMarkdownFileList->currentItem());
     updateChapterFolderPathLabel();
 }
 
@@ -1844,6 +1927,8 @@ void PlaylistWindow::on_tabWidget_currentChanged(int index)
 {
     if (isChapterPreviewTab(index) || isChapterTopicsTab(index) || isJumpHistoryTab(index))
         ui->searchHost->setVisible(false);
+    if (isChapterPreviewTab(index))
+        refreshChapterMarkdownFileList(true);
     updateCurrentPlaylist();
 }
 
@@ -1890,6 +1975,7 @@ void PlaylistWindow::saveChapterMarkdown()
     file.write(markdown.toUtf8());
     file.close();
     setChapterPreviewHtml(buildChapterPreviewHtml(markdown));
+    refreshChapterMarkdownFileList(true);
     refreshChapterTopicsForCurrentPlaylist();
     QMessageBox::information(this, tr("保存成功"), tr("章节 Markdown 已保存。"));
     setChapterEditorMode(false);
@@ -1971,6 +2057,16 @@ void PlaylistWindow::chapterTopicCardActivated(QListWidgetItem *item)
     }
 }
 
+void PlaylistWindow::chapterMarkdownFileActivated(QListWidgetItem *item)
+{
+    if (!item)
+        return;
+    const QString markdownPath = item->data(Qt::UserRole).toString();
+    if (markdownPath.isEmpty())
+        return;
+    loadChapterMarkdownFromPath(markdownPath);
+}
+
 void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUuid,
                                                  QUuid itemUuid, bool clickedInPlaylist)
 {
@@ -1980,27 +2076,7 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     ensureChapterPreviewTab();
     currentPlayingUrl = itemUrl;
 
-    if (!itemUrl.isLocalFile()) {
-        chapterMarkdownPath.clear();
-        if (chapterPreviewEditor)
-            chapterPreviewEditor->clear();
-        setChapterPreviewHtml(tr("<p>Chapter preview only supports local video files.</p>"));
-        refreshChapterTopicsForCurrentPlaylist();
-        updateChapterFolderPathLabel();
-        return;
-    }
-
-    const QFileInfo videoInfo(itemUrl.toLocalFile());
-    chapterMarkdownPath = findChapterMarkdownForVideo(videoInfo);
-    if (chapterMarkdownPath.isEmpty()) {
-        if (chapterPreviewEditor)
-            chapterPreviewEditor->clear();
-        setChapterPreviewHtml(tr("<p>No chapter markdown found for the current video.</p>"));
-        refreshChapterTopicsForCurrentPlaylist();
-        updateChapterFolderPathLabel();
-        return;
-    }
-    loadChapterMarkdownFromPath(chapterMarkdownPath);
+    refreshChapterMarkdownFileList(true);
     refreshChapterTopicsForCurrentPlaylist();
 }
 
