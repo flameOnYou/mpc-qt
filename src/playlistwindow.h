@@ -59,6 +59,7 @@ public:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event);
+    void changeEvent(QEvent *event) override;
     void dragEnterEvent(QDragEnterEvent *event);
     void dropEvent(QDropEvent *event);
     void wheelEvent(QWheelEvent *event);
@@ -182,7 +183,9 @@ private:
     void refreshChapterTopicsForCurrentPlaylist();
     void loadChapterMarkdownFromPath(const QString &markdownPath);
     void setChapterPreviewHtml(const QString &html);
+    void applyChapterTabStyles();
     QString buildChapterPreviewHtml(const QString &markdown);
+    QString buildChapterPreviewStyleSheet() const;
     bool validateChapterMarkdown(const QString &markdown, QString &error) const;
     void setChapterEditorMode(bool editing);
     double parseChapterTimeToSeconds(const QString &timeText, bool *ok) const;
