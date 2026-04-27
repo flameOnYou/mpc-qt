@@ -951,12 +951,17 @@ QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
         const QString label = match.captured(2);
         const QString time = chapterAttributeValue(attributes, QStringLiteral("datetime"));
         const QString video = chapterAttributeValue(attributes, QStringLiteral("video"));
-        const QString target = video.isEmpty()
-                ? QStringLiteral("chapter://jump?time=%1").arg(time)
-                : QStringLiteral("chapter://jump?time=%1&video=%2")
-                      .arg(time, QString::fromUtf8(QUrl::toPercentEncoding(video)));
+        QUrl targetUrl;
+        targetUrl.setScheme(QStringLiteral("chapter"));
+        targetUrl.setHost(QStringLiteral("jump"));
+        QUrlQuery targetQuery;
+        targetQuery.addQueryItem(QStringLiteral("time"), time);
+        if (!video.isEmpty())
+            targetQuery.addQueryItem(QStringLiteral("video"), video);
+        targetUrl.setQuery(targetQuery);
+
         rendered += QStringLiteral("[%1](%2) <small>[%3]</small>")
-                .arg(label, target, time);
+                .arg(label, targetUrl.toString(QUrl::FullyEncoded), time);
         lastPos = match.capturedEnd();
     }
     rendered += converted.mid(lastPos);
@@ -2103,8 +2108,8 @@ void PlaylistWindow::chapterPreviewAnchorClicked(const QUrl &link)
     if (link.scheme() != "chapter")
         return;
     const QUrlQuery query(link);
-    const QString timeText = query.queryItemValue("time");
-    const QString targetVideo = QUrl::fromPercentEncoding(query.queryItemValue("video").toUtf8());
+    const QString timeText = query.queryItemValue(QStringLiteral("time"), QUrl::FullyDecoded);
+    const QString targetVideo = query.queryItemValue(QStringLiteral("video"), QUrl::FullyDecoded);
     performChapterJump(timeText, targetVideo);
 }
 
