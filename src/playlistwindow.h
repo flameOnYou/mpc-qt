@@ -95,6 +95,8 @@ signals:
     void playlistMovedToBackup(QUuid backupUuid);
     void closingPlaylist(QUuid playlist);
     void chapterTimeRequested(double timeInSeconds);
+    void chapterCrossVideoJumpScheduled(QUrl targetVideoUrl, double timeInSeconds);
+    void chapterCrossVideoJumpCancelled();
 
 public slots:
     void setIconTheme(IconThemer::FolderMode folderMode, const QString &customFolder);
@@ -201,7 +203,7 @@ private:
     void recordJumpHistoryEntry(const QUrl &videoUrl, double timeInSeconds);
     QString displayNameForVideo(const QUrl &videoUrl) const;
     QString formatSecondsAsClock(double seconds) const;
-    bool jumpToVideoFileName(const QString &videoFileName);
+    bool jumpToVideoFileName(const QString &videoFileName, QUrl *resolvedTargetUrl = nullptr);
     void ensureJumpHistoryTab();
     bool isJumpHistoryTab(int index) const;
     void refreshJumpHistoryTable();
@@ -238,10 +240,6 @@ private:
     bool chapterEditMode = false;
     QUrl currentPlayingUrl;
     double currentPlaybackTimeSeconds = 0.0;
-    bool pendingChapterJump = false;
-    double pendingChapterJumpSeconds = 0.0;
-    QString pendingChapterJumpTargetVideo;
-
     struct TopicCard {
         QString label;
         QString time;

@@ -138,6 +138,8 @@ public slots:
     void changeChapter(int64_t diff);
     void navigateToChapter(int64_t chapter);
     void navigateToTime(double time);
+    void scheduleChapterCrossVideoJump(QUrl targetVideoUrl, double timeInSeconds);
+    void clearChapterCrossVideoJump();
     void speedUp();
     void speedDown();
     void speedReset();
@@ -242,6 +244,9 @@ private:
     int64_t currentMpvPlaylistItemId = 0;
 
     double mpvStartTime = -1.0;
+    bool pendingChapterCrossVideoJump = false;
+    QUrl pendingChapterCrossVideoTargetVideoUrl;
+    double pendingChapterCrossVideoTime = -1.0;
     double mpvTime = 0.0;
     double mpvLength = 0.0;
     double mpvSpeed = 1.0;
