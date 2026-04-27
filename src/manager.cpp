@@ -174,6 +174,10 @@ void PlaybackManager::setPlaylistWindow(PlaylistWindow *playlistWindow)
             playlistWindow, &PlaylistWindow::updateCurrentPlaybackTime);
     connect(playlistWindow, &PlaylistWindow::chapterTimeRequested,
             this, &PlaybackManager::navigateToTime);
+    connect(playlistWindow, &PlaylistWindow::chapterCrossVideoJumpScheduled,
+            this, &PlaybackManager::scheduleChapterCrossVideoJump);
+    connect(playlistWindow, &PlaylistWindow::chapterCrossVideoJumpCancelled,
+            this, &PlaybackManager::clearChapterCrossVideoJump);
 }
 
 QUrl PlaybackManager::nowPlaying()
@@ -439,6 +443,37 @@ void PlaybackManager::navigateToTime(double time)
         mpvStartTime = time;
     else
         mpvObject_->setTime(time);
+}
+
+static bool chapterJumpTargetMatches(const QUrl &opening, const QUrl &target)
+{
+    if (!opening.isValid() || !target.isValid())
+        return false;
+    if (opening.isLocalFile() && target.isLocalFile()) {
+        const QFileInfo openingInfo(opening.toLocalFile());
+        const QFileInfo targetInfo(target.toLocalFile());
+        const QString openingCanonical = openingInfo.canonicalFilePath();
+        const QString targetCanonical = targetInfo.canonicalFilePath();
+        if (!openingCanonical.isEmpty() && !targetCanonical.isEmpty())
+            return openingCanonical.compare(targetCanonical, Qt::CaseInsensitive) == 0;
+        return openingInfo.absoluteFilePath().compare(targetInfo.absoluteFilePath(), Qt::CaseInsensitive) == 0;
+    }
+    return opening.adjusted(QUrl::NormalizePathSegments) == target.adjusted(QUrl::NormalizePathSegments);
+}
+
+void PlaybackManager::scheduleChapterCrossVideoJump(QUrl targetVideoUrl, double timeInSeconds)
+{
+    pendingChapterCrossVideoTargetVideoUrl = targetVideoUrl;
+    pendingChapterCrossVideoTime = std::max(0.0, timeInSeconds);
+    pendingChapterCrossVideoJump = pendingChapterCrossVideoTargetVideoUrl.isValid()
+            && !pendingChapterCrossVideoTargetVideoUrl.isEmpty();
+}
+
+void PlaybackManager::clearChapterCrossVideoJump()
+{
+    pendingChapterCrossVideoJump = false;
+    pendingChapterCrossVideoTargetVideoUrl = QUrl();
+    pendingChapterCrossVideoTime = -1.0;
 }
 
 void PlaybackManager::speedUp()
@@ -709,6 +744,12 @@ void PlaybackManager::startPlayWithUuid(QUrl what, QUuid playlistUuid,
     emit stateChanged(playbackState_ = WaitingState);
 
     mpvStartTime = -1.0;
+    if (pendingChapterCrossVideoJump) {
+        if (chapterJumpTargetMatches(what, pendingChapterCrossVideoTargetVideoUrl)) {
+            mpvStartTime = pendingChapterCrossVideoTime;
+        }
+        clearChapterCrossVideoJump();
+    }
 
     if (!isRepeating)
         emit aboutToStartPlayingFile(what);
@@ -1016,7 +1057,7 @@ void PlaybackManager::mpvw_playLengthChanged(double length)
 
 void PlaybackManager::mpvw_seekableChanged(bool yes)
 {
-    if (yes && mpvStartTime > 0) {
+    if (yes && mpvStartTime >= 0) {
         mpvObject_->setTimeSync(mpvStartTime);
         mpvStartTime = -1;
     }

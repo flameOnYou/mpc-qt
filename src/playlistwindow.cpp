@@ -2078,20 +2078,6 @@ void PlaylistWindow::updateChapterPreviewForItem(QUrl itemUrl, QUuid playlistUui
     ensureChapterPreviewTab();
     currentPlayingUrl = itemUrl;
 
-    if (pendingChapterJump) {
-        const QString currentVideoName = itemUrl.isLocalFile()
-                ? QFileInfo(itemUrl.toLocalFile()).fileName()
-                : QString();
-        if (pendingChapterJumpTargetVideo.isEmpty()
-                || currentVideoName.compare(pendingChapterJumpTargetVideo, Qt::CaseInsensitive) == 0) {
-            const double pendingSeconds = pendingChapterJumpSeconds;
-            pendingChapterJump = false;
-            pendingChapterJumpSeconds = 0.0;
-            pendingChapterJumpTargetVideo.clear();
-            emit chapterTimeRequested(pendingSeconds);
-        }
-    }
-
     if (!itemUrl.isLocalFile()) {
         setChapterPreviewHtml(tr("<p>Current item is not local; showing markdown files from scan folder if available.</p>"));
         refreshChapterMarkdownFileList(true);
@@ -2164,7 +2150,7 @@ void PlaylistWindow::refreshJumpHistoryTable()
     }
 }
 
-bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
+bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName, QUrl *resolvedTargetUrl)
 {
     const QString needle = videoFileName.trimmed();
     if (needle.isEmpty())
@@ -2190,8 +2176,12 @@ bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
     });
 
     if (matched) {
+        if (resolvedTargetUrl)
+            *resolvedTargetUrl = getUrlOf(matchedPlaylist, matchedItem);
         activateItem(matchedPlaylist, matchedItem, true);
-        emit itemDesired(matchedPlaylist, matchedItem, true);
+        QMetaObject::invokeMethod(this, [this, matchedPlaylist, matchedItem]() {
+            emit itemDesired(matchedPlaylist, matchedItem, true);
+        }, Qt::QueuedConnection);
         return true;
     }
 
@@ -2202,8 +2192,12 @@ bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
         if (targetInfo.exists() && targetInfo.isFile() && targetInfo.isReadable()) {
             const PlaylistItem added = addToCurrentPlaylist({ QUrl::fromLocalFile(targetInfo.absoluteFilePath()) });
             if (!added.item.isNull()) {
+                if (resolvedTargetUrl)
+                    *resolvedTargetUrl = QUrl::fromLocalFile(targetInfo.absoluteFilePath());
                 activateItem(added.list, added.item, true);
-                emit itemDesired(added.list, added.item, true);
+                QMetaObject::invokeMethod(this, [this, added]() {
+                    emit itemDesired(added.list, added.item, true);
+                }, Qt::QueuedConnection);
                 return true;
             }
         }
@@ -2224,23 +2218,23 @@ void PlaylistWindow::performChapterJump(const QString &timeText, const QString &
 
     const QString target = targetVideoFileName.trimmed();
     if (!target.isEmpty()) {
-        pendingChapterJump = true;
-        pendingChapterJumpSeconds = seconds;
-        pendingChapterJumpTargetVideo = target;
-
-        if (!jumpToVideoFileName(target)) {
-            pendingChapterJump = false;
-            pendingChapterJumpSeconds = 0.0;
-            pendingChapterJumpTargetVideo.clear();
+        QUrl resolvedTargetUrl;
+        if (!jumpToVideoFileName(target, &resolvedTargetUrl)) {
+            emit chapterCrossVideoJumpCancelled();
             QMessageBox::warning(this, tr("跳转失败"),
                                  tr("未找到视频文件：%1。已按播放列表与 Markdown 扫描目录尝试查找。").arg(target));
             return;
         }
+        if (!resolvedTargetUrl.isValid() || resolvedTargetUrl.isEmpty()) {
+            emit chapterCrossVideoJumpCancelled();
+            QMessageBox::warning(this, tr("跳转失败"),
+                                 tr("目标视频已触发切换，但未能解析有效地址：%1。").arg(target));
+            return;
+        }
+        emit chapterCrossVideoJumpScheduled(resolvedTargetUrl, seconds);
         return;
     }
-    pendingChapterJump = false;
-    pendingChapterJumpSeconds = 0.0;
-    pendingChapterJumpTargetVideo.clear();
+    emit chapterCrossVideoJumpCancelled();
     emit chapterTimeRequested(seconds);
 }
 
