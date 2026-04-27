@@ -2224,9 +2224,6 @@ void PlaylistWindow::performChapterJump(const QString &timeText, const QString &
 
     const QString target = targetVideoFileName.trimmed();
     if (!target.isEmpty()) {
-        // Set pending jump state before switching items. itemDesired/playback
-        // signals are synchronous here and may immediately trigger
-        // updateChapterPreviewForItem.
         pendingChapterJump = true;
         pendingChapterJumpSeconds = seconds;
         pendingChapterJumpTargetVideo = target;
