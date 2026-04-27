@@ -951,12 +951,17 @@ QString PlaylistWindow::buildChapterPreviewHtml(const QString &markdown)
         const QString label = match.captured(2);
         const QString time = chapterAttributeValue(attributes, QStringLiteral("datetime"));
         const QString video = chapterAttributeValue(attributes, QStringLiteral("video"));
-        const QString target = video.isEmpty()
-                ? QStringLiteral("chapter://jump?time=%1").arg(time)
-                : QStringLiteral("chapter://jump?time=%1&video=%2")
-                      .arg(time, QString::fromUtf8(QUrl::toPercentEncoding(video)));
+        QUrl targetUrl;
+        targetUrl.setScheme(QStringLiteral("chapter"));
+        targetUrl.setHost(QStringLiteral("jump"));
+        QUrlQuery targetQuery;
+        targetQuery.addQueryItem(QStringLiteral("time"), time);
+        if (!video.isEmpty())
+            targetQuery.addQueryItem(QStringLiteral("video"), video);
+        targetUrl.setQuery(targetQuery);
+
         rendered += QStringLiteral("[%1](%2) <small>[%3]</small>")
-                .arg(label, target, time);
+                .arg(label, targetUrl.toString(QUrl::FullyEncoded), time);
         lastPos = match.capturedEnd();
     }
     rendered += converted.mid(lastPos);
@@ -2103,8 +2108,8 @@ void PlaylistWindow::chapterPreviewAnchorClicked(const QUrl &link)
     if (link.scheme() != "chapter")
         return;
     const QUrlQuery query(link);
-    const QString timeText = query.queryItemValue("time");
-    const QString targetVideo = QUrl::fromPercentEncoding(query.queryItemValue("video").toUtf8());
+    const QString timeText = query.queryItemValue(QStringLiteral("time"), QUrl::FullyDecoded);
+    const QString targetVideo = query.queryItemValue(QStringLiteral("video"), QUrl::FullyDecoded);
     performChapterJump(timeText, targetVideo);
 }
 
@@ -2166,6 +2171,9 @@ bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
         return false;
 
     bool matched = false;
+    QUuid matchedPlaylist;
+    QUuid matchedItem;
+
     PlaylistCollection::getSingleton()->iteratePlaylists([&](QSharedPointer<Playlist> pl) {
         if (matched || !pl)
             return;
@@ -2175,13 +2183,17 @@ bool PlaylistWindow::jumpToVideoFileName(const QString &videoFileName)
             QFileInfo info(item->url().toLocalFile());
             if (info.fileName().compare(needle, Qt::CaseInsensitive) == 0) {
                 matched = true;
-                activateItem(pl->uuid(), item->uuid(), true);
-                emit itemDesired(pl->uuid(), item->uuid(), true);
+                matchedPlaylist = pl->uuid();
+                matchedItem = item->uuid();
             }
         });
     });
-    if (matched)
+
+    if (matched) {
+        activateItem(matchedPlaylist, matchedItem, true);
+        emit itemDesired(matchedPlaylist, matchedItem, true);
         return true;
+    }
 
     const QString scanFolder = chapterMarkdownScanFolder();
     if (!scanFolder.isEmpty()) {
@@ -2212,14 +2224,21 @@ void PlaylistWindow::performChapterJump(const QString &timeText, const QString &
 
     const QString target = targetVideoFileName.trimmed();
     if (!target.isEmpty()) {
+        // Set pending jump state before switching items. itemDesired/playback
+        // signals are synchronous here and may immediately trigger
+        // updateChapterPreviewForItem.
+        pendingChapterJump = true;
+        pendingChapterJumpSeconds = seconds;
+        pendingChapterJumpTargetVideo = target;
+
         if (!jumpToVideoFileName(target)) {
+            pendingChapterJump = false;
+            pendingChapterJumpSeconds = 0.0;
+            pendingChapterJumpTargetVideo.clear();
             QMessageBox::warning(this, tr("跳转失败"),
                                  tr("未找到视频文件：%1。已按播放列表与 Markdown 扫描目录尝试查找。").arg(target));
             return;
         }
-        pendingChapterJump = true;
-        pendingChapterJumpSeconds = seconds;
-        pendingChapterJumpTargetVideo = target;
         return;
     }
     pendingChapterJump = false;
